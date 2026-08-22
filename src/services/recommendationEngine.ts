@@ -436,18 +436,14 @@ export function runRecommendationPipeline(
         opp.purposeType === 'capability_independence'
       ) {
         fitScore += 20;
-      } else if (
-        (contextPrompt.includes('horse') ||
-          contextPrompt.includes('animal') ||
-          contextPrompt.includes('pet') ||
-          contextPrompt.includes('nature') ||
-          contextPrompt.includes('马') ||
-          contextPrompt.includes('动物') ||
-          contextPrompt.includes('宠物')) &&
-        (opp.topics.includes('nature_discovery') || opp.id === 'opp-botanic-soundwalk' || opp.topics.includes('gardening'))
-      ) {
-        fitScore += 20;
       }
+    }
+
+    if (
+      isNatureInterest &&
+      (opp.topics.includes('nature_discovery') || opp.id === 'opp-botanic-soundwalk' || opp.topics.includes('gardening'))
+    ) {
+      fitScore += opp.id === 'opp-botanic-soundwalk' ? 28 : 8;
     }
 
     // Barrier resolution fit (e.g. Doorway greeter for alone/unfamiliar barrier)

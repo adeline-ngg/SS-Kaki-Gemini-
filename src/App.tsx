@@ -31,7 +31,7 @@ import {
   INITIAL_MY_WORLD_STATS,
   MY_WORLD_CATEGORIES,
 } from './data/mockData';
-import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG, createFreshGraph, understandingItemsFromGraph } from './data/opportunities';
+import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG, createFreshGraph, understandingItemsFromGraph, lockGraphFromReview, reviewContextPrompt } from './data/opportunities';
 import { runRecommendationPipeline } from './services/recommendationEngine';
 import { TestScenario } from './data/scenarios';
 import { LiveVoiceService } from './services/liveVoiceService';
@@ -119,6 +119,19 @@ export default function App() {
     }
   }, []);
 
+  const rankFromLockedReview = useCallback(
+    (graph: LifeParticipationGraph, items: UnderstandingItem[]) => {
+      const locked = lockGraphFromReview(graph, conversationTranscriptRef.current, items);
+      setLifeGraph(locked);
+      syncPipeline(
+        locked,
+        reviewContextPrompt(conversationTranscriptRef.current, items, locked.sessionInsights?.interests)
+      );
+      return locked;
+    },
+    [syncPipeline]
+  );
+
   // Initialize LiveVoiceService once
   useEffect(() => {
     const service = new LiveVoiceService({
@@ -153,20 +166,13 @@ export default function App() {
           setLiveErrorMessage(null);
         }
       },
-      onGraphUpdated: (updatedGraph, recs) => {
+      onGraphUpdated: (updatedGraph) => {
         if (!shouldApplyLiveGraphUpdate(currentScreenRef.current)) {
           return;
         }
-        setLifeGraph(updatedGraph);
-        setUnderstandingItems(
-          understandingItemsFromGraph(updatedGraph, conversationTranscriptRef.current)
-        );
-        if (recs && recs.length > 0) {
-          setRecommendationsList(recs);
-          setCurrentRecIndex(0);
-        } else {
-          syncPipeline(updatedGraph, conversationTranscriptRef.current);
-        }
+        const items = understandingItemsFromGraph(updatedGraph, conversationTranscriptRef.current);
+        setUnderstandingItems(items);
+        rankFromLockedReview(updatedGraph, items);
       },
       onRecommendationsRequested: (recs) => {
         if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
@@ -182,16 +188,9 @@ export default function App() {
           return;
         }
         const graphForCards = updatedGraph || lifeGraphRef.current;
-        if (updatedGraph) setLifeGraph(updatedGraph);
-        if (recs && recs.length > 0) {
-          setRecommendationsList(recs);
-          setCurrentRecIndex(0);
-        } else {
-          syncPipeline(graphForCards, conversationTranscriptRef.current);
-        }
-        setUnderstandingItems(
-          understandingItemsFromGraph(graphForCards, conversationTranscriptRef.current)
-        );
+        const items = understandingItemsFromGraph(graphForCards, conversationTranscriptRef.current);
+        setUnderstandingItems(items);
+        rankFromLockedReview(graphForCards, items);
         beginVoiceReview();
         setCurrentScreen('understanding');
       },
@@ -226,10 +225,12 @@ export default function App() {
         const target = resolveLiveNavigateTarget(screen, currentScreenRef.current);
         if (!target) return;
         if (target === 'understanding') {
-          setUnderstandingItems(
-            understandingItemsFromGraph(lifeGraphRef.current, conversationTranscriptRef.current)
+          const items = understandingItemsFromGraph(
+            lifeGraphRef.current,
+            conversationTranscriptRef.current
           );
-          syncPipeline(lifeGraphRef.current, conversationTranscriptRef.current);
+          setUnderstandingItems(items);
+          rankFromLockedReview(lifeGraphRef.current, items);
         }
         if (target !== 'conversation') {
           beginVoiceReview();
@@ -250,7 +251,7 @@ export default function App() {
     return () => {
       service.disconnect();
     };
-  }, [syncPipeline, stopLiveVoice, beginVoiceReview]);
+  }, [syncPipeline, stopLiveVoice, beginVoiceReview, rankFromLockedReview]);
 
   // Keep live voice service updated with graph and current recommendation
   const currentRecommendation = recommendationsList[currentRecIndex] || RECOMMENDATIONS[0];
@@ -431,10 +432,9 @@ export default function App() {
 
   const handleProceedToUnderstanding = () => {
     stopLiveVoice();
-    setUnderstandingItems(
-      understandingItemsFromGraph(lifeGraph, conversationTranscriptRef.current)
-    );
-    syncPipeline(lifeGraph, conversationTranscriptRef.current);
+    const items = understandingItemsFromGraph(lifeGraph, conversationTranscriptRef.current);
+    setUnderstandingItems(items);
+    rankFromLockedReview(lifeGraph, items);
     setCurrentScreen('understanding');
   };
 
@@ -458,7 +458,7 @@ export default function App() {
 
   const handleConfirmUnderstanding = () => {
     stopLiveVoice();
-    syncPipeline(lifeGraph, conversationTranscriptRef.current);
+    rankFromLockedReview(lifeGraph, understandingItems);
     setCurrentScreen('recommendation');
   };
 

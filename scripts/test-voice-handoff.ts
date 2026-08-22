@@ -7,6 +7,8 @@ import {
   createFreshGraph,
   mergeConversationInsights,
   understandingItemsFromGraph,
+  lockGraphFromReview,
+  inferConversationInterests,
   OPPORTUNITY_CATALOG,
 } from '../src/data/opportunities.ts';
 import { runRecommendationPipeline } from '../src/services/recommendationEngine.ts';
@@ -98,6 +100,28 @@ assert(
 assert(
   'Horse/animal talk does not pin LPA as the first card',
   horseRecs.topOpportunities[0]?.id !== 'opp-lpa-basics'
+);
+assert(
+  'Horse/animal talk prefers the Botanic Gardens nature walk as the top card',
+  horseRecs.topOpportunities[0]?.id === 'opp-botanic-soundwalk'
+);
+
+const spokenOnlyGraph = createFreshGraph();
+const spokenCards = understandingItemsFromGraph(spokenOnlyGraph, 'I like horses and animals');
+const lockedFromCards = lockGraphFromReview(spokenOnlyGraph, 'I like horses and animals', spokenCards);
+const lockedRecs = runRecommendationPipeline(
+  lockedFromCards,
+  OPPORTUNITY_CATALOG,
+  'I like horses and animals'
+);
+assert(
+  'inferConversationInterests extracts horses from spoken text',
+  inferConversationInterests('I like horses and animals').includes('horses')
+);
+assert(
+  'Confirming spoken insight cards ranks nature, not the default LPA/today card',
+  lockedRecs.topOpportunities[0]?.id === 'opp-botanic-soundwalk' &&
+    lockedFromCards.sessionInsights?.interests.some((item) => /horse|animal/i.test(item))
 );
 
 if (failed > 0) {

@@ -5,7 +5,7 @@ import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Modality, Type, LiveServerMessage } from '@google/genai';
-import { OPPORTUNITY_CATALOG, DEFAULT_LIFE_PARTICIPATION_GRAPH, mergeConversationInsights, understandingItemsFromGraph } from './src/data/opportunities';
+import { OPPORTUNITY_CATALOG, DEFAULT_LIFE_PARTICIPATION_GRAPH, mergeConversationInsights, understandingItemsFromGraph, inferConversationInterests } from './src/data/opportunities';
 import { runRecommendationPipeline, getPurposeFraming } from './src/services/recommendationEngine';
 import { TEST_SCENARIOS } from './src/data/scenarios';
 import { LifeParticipationGraph, Opportunity } from './src/types';
@@ -291,6 +291,11 @@ async function startServer() {
       return recResult.topOpportunities;
     };
 
+    const lockGraphFromTranscript = (graph: LifeParticipationGraph) =>
+      mergeConversationInsights(graph, {
+        interests: inferConversationInterests(userTranscriptAccum),
+      });
+
     // Initialize Gemini Live Session
     const ai = getGeminiClient();
     if (!ai) {
@@ -415,7 +420,10 @@ async function startServer() {
 
                     if (name === 'update_life_participation_graph') {
                       currentGraph = mergeConversationInsights(currentGraph, {
-                        interests: Array.isArray(args.interests) ? args.interests : [],
+                        interests: [
+                          ...(Array.isArray(args.interests) ? args.interests : []),
+                          ...inferConversationInterests(userTranscriptAccum),
+                        ],
                         participationBarriers: Array.isArray(args.participationBarriers)
                           ? args.participationBarriers
                           : [],
@@ -441,6 +449,7 @@ async function startServer() {
                         firstTopRecommendation: recs[0] ? recs[0].titleEn : null,
                       };
                     } else if (name === 'request_opportunity_recommendation') {
+                      currentGraph = lockGraphFromTranscript(currentGraph);
                       const reasonStr = typeof args.reason === 'string' ? args.reason : undefined;
                       const recs = getRecommendationsForGraph(
                         currentGraph,
@@ -470,6 +479,7 @@ async function startServer() {
                         })),
                       };
                     } else if (name === 'accept_current_opportunity') {
+                      currentGraph = lockGraphFromTranscript(currentGraph);
                       const recs = getRecommendationsForGraph(currentGraph, userTranscriptAccum);
                       if (recs[0]) {
                         currentOpportunityId = recs[0].id;
@@ -834,7 +844,7 @@ Return strictly JSON matching this structure:
       }
 
       const updatedGraph: LifeParticipationGraph = mergeConversationInsights(graph, {
-        interests: parsedData.graphUpdates?.interests || [],
+        interests: [...(parsedData.graphUpdates?.interests || []), ...inferConversationInterests(userUtterance)],
         participationBarriers: parsedData.graphUpdates?.participationBarriers || [],
         accessibilityPreferences: parsedData.graphUpdates?.accessibilityPreferences || [],
         purposeDrivers: parsedData.graphUpdates?.purposeDrivers || [],

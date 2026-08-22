@@ -55,9 +55,9 @@ export default function App() {
   // Core Life Participation Graph
   const [lifeGraph, setLifeGraph] = useState<LifeParticipationGraph>(DEFAULT_LIFE_PARTICIPATION_GRAPH);
 
-  // Conversational utterances
-  const [userUtteranceZh, setUserUtteranceZh] = useState('“以前我跟我老公很喜欢去跳舞。Ballroom 那种。现在比较少去了。”');
-  const [userUtteranceEn, setUserUtteranceEn] = useState('"My late husband and I used to love ballroom dancing. We rarely go these days."');
+  // Conversational utterances — empty until speech or typed input is actually received
+  const [userUtteranceZh, setUserUtteranceZh] = useState('');
+  const [userUtteranceEn, setUserUtteranceEn] = useState('');
   const [kakiResponseZh, setKakiResponseZh] = useState('“原来你还是很喜欢跳舞。现在如果有人陪你一起去，你会比较愿意吗？”');
   const [kakiResponseEn, setKakiResponseEn] = useState('"So dancing is still something you love. If someone could accompany you, would you feel more open to going?"');
 
@@ -95,8 +95,14 @@ export default function App() {
         setConversationState(state);
       },
       onUserTranscript: (text) => {
-        setUserUtteranceZh(`“${text}”`);
-        setUserUtteranceEn(`"${text}"`);
+        const trimmed = (text || '').trim();
+        if (!trimmed) {
+          setUserUtteranceZh('');
+          setUserUtteranceEn('');
+          return;
+        }
+        setUserUtteranceZh(`“${trimmed}”`);
+        setUserUtteranceEn(`"${trimmed}"`);
       },
       onModelTranscript: (text) => {
         setKakiResponseZh(`“${text}”`);
@@ -302,8 +308,8 @@ export default function App() {
     setCurrentRecIndex(0);
     setConfirmedActivity(null);
     setMyWorldStats(INITIAL_MY_WORLD_STATS);
-    setUserUtteranceZh('“以前我跟我老公很喜欢去跳舞。Ballroom 那种。现在比较少去了。”');
-    setUserUtteranceEn('"My husband and I used to really enjoy ballroom dancing. We don\'t go much anymore."');
+    setUserUtteranceZh('');
+    setUserUtteranceEn('');
     setKakiResponseZh('“原来你还是很喜欢跳舞。大巴窑联络所有温和的茶舞与音乐聚会，环境很轻松，你想不想去看看？”');
     setKakiResponseEn('"So dancing is still something you love. Toa Payoh CC has a relaxed tea dance and evergreen music gathering. Would you like to check it out?"');
     setMemoryConsentPrompt(null);
@@ -320,6 +326,9 @@ export default function App() {
     setCurrentScreen('conversation');
     setConversationState('listening');
     setLiveErrorMessage(null);
+    setUserUtteranceZh('');
+    setUserUtteranceEn('');
+    liveVoiceServiceRef.current?.resetConversation();
 
     if (liveVoiceMode === 'live' && liveVoiceServiceRef.current) {
       const success = await liveVoiceServiceRef.current.startRecording();

@@ -41,36 +41,37 @@ function isRetryableGeminiError(error: any): boolean {
   return status === 503 || status === 429 || /UNAVAILABLE|high demand|try again later/i.test(message);
 }
 
+// Stick to the last model that actually responded so we do not wait on 503s every turn.
+let lastGoodChatModel: string = GEMINI_CHAT_FALLBACK_MODEL;
+
 async function generateChatContent(ai: GoogleGenAI, prompt: string) {
-  const models = [GEMINI_CHAT_MODEL, GEMINI_CHAT_FALLBACK_MODEL];
+  const models = Array.from(
+    new Set([lastGoodChatModel, GEMINI_CHAT_FALLBACK_MODEL, GEMINI_CHAT_MODEL])
+  );
   let lastError: any = null;
 
   for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-            systemInstruction: SYSTEM_PROMPT,
-            responseMimeType: 'application/json',
-            temperature: 0.3,
-          },
-        });
-        if (model !== GEMINI_CHAT_MODEL) {
-          console.warn(`[Gemini chat] served by fallback model ${model}`);
-        }
-        return response;
-      } catch (error: any) {
-        lastError = error;
-        if (!isRetryableGeminiError(error)) {
-          throw error;
-        }
-        console.warn(`[Gemini chat] ${model} attempt ${attempt + 1} failed (${error.status || error.message})`);
-        if (attempt === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
-        }
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          systemInstruction: SYSTEM_PROMPT,
+          responseMimeType: 'application/json',
+          temperature: 0.3,
+        },
+      });
+      lastGoodChatModel = model;
+      if (model !== GEMINI_CHAT_MODEL) {
+        console.warn(`[Gemini chat] served by ${model}`);
       }
+      return response;
+    } catch (error: any) {
+      lastError = error;
+      if (!isRetryableGeminiError(error)) {
+        throw error;
+      }
+      console.warn(`[Gemini chat] ${model} unavailable (${error.status || error.message}), trying next model`);
     }
   }
 

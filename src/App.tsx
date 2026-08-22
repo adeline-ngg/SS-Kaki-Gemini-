@@ -191,11 +191,17 @@ export default function App() {
   const handleProcessUtterance = async (utterance: string) => {
     setIsLoadingBackend(true);
     setConversationState('thinking');
+    setUserUtteranceZh(`“${utterance}”`);
+    setUserUtteranceEn(`"${utterance}"`);
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 25000);
 
     try {
       const res = await fetch('/api/kaki/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           userUtterance: utterance,
           currentGraph: lifeGraph,
@@ -219,10 +225,16 @@ export default function App() {
           setRecommendationsList(data.topRecommendations);
           setCurrentRecIndex(0);
         }
+      } else {
+        setKakiResponseEn('"Give me a moment — the connection was slow just now. Could you say that again?"');
+        setKakiResponseZh('"等我一下，刚才连线有点慢。可以再说一次吗？"');
       }
     } catch (e) {
       console.warn('Backend API unavailable, using local pipeline synthesis:', e);
+      setKakiResponseEn('"Give me a moment — the connection was slow just now. Could you say that again?"');
+      setKakiResponseZh('"等我一下，刚才连线有点慢。可以再说一次吗？"');
     } finally {
+      window.clearTimeout(timeoutId);
       setIsLoadingBackend(false);
       setConversationState('speaking');
       // Play audio response via TTS fallback only if audio is enabled

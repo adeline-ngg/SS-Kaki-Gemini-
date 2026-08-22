@@ -108,7 +108,8 @@ VOICE & TONE GUIDELINES:
 8. TOOL & ACTION CALLING:
    - When the user shares interests, barriers, or life stage signals, call "update_life_participation_graph".
    - When enough context exists or the user is open to seeing activities, call "request_opportunity_recommendation".
-   - When an activity is shown and the user says "这个可以" / "Sounds good" / "Okay lah", call "accept_current_opportunity".
+   - When the user is ready to review what you understood, or says "这个可以" / "Sounds good" / "Okay lah" during conversation, call "accept_current_opportunity" to show the understanding check, then the event card. Do NOT skip to a completed/saved state.
+   - Only call "navigate_to_screen" with "understanding" or "recommendation" after a conversation. Never navigate to "my-world" from conversation; that screen is only after the user confirms the event card.
    - When the user says "不要这个" / "太远了", call "reject_current_opportunity" (and record distance/transport barrier).
    - When the user asks "为什么推荐这个？", call "explain_current_recommendation".
    - For meaningful long-term preferences, call "request_memory_consent" (e.g. "Would you like me to remember that?").
@@ -452,18 +453,12 @@ async function startServer() {
                       };
                     } else if (name === 'accept_current_opportunity') {
                       const acceptedId = args.opportunityId || currentOpportunityId;
-                      const matched = OPPORTUNITY_CATALOG.find((o) => o.id === acceptedId) || OPPORTUNITY_CATALOG[0];
-
-                      currentGraph = {
-                        ...currentGraph,
-                        completedOpportunityIds: [
-                          ...(currentGraph.completedOpportunityIds || []),
-                          matched.id,
-                        ],
-                        completedTopicKeys: matched.repeatTopicKey
-                          ? [...(currentGraph.completedTopicKeys || []), matched.repeatTopicKey]
-                          : currentGraph.completedTopicKeys,
-                      };
+                      const recs = getRecommendationsForGraph(currentGraph);
+                      const matched =
+                        OPPORTUNITY_CATALOG.find((o) => o.id === acceptedId) || recs[0] || OPPORTUNITY_CATALOG[0];
+                      if (matched) {
+                        currentOpportunityId = matched.id;
+                      }
 
                       clientWs.send(
                         JSON.stringify({
@@ -476,7 +471,8 @@ async function startServer() {
                       result = {
                         success: true,
                         acceptedActivity: matched.titleEn,
-                        message: 'Confirmed and recorded in Life Participation Graph.',
+                        message: 'Show the understanding check, then the event details. Do not mark it completed yet.',
+                        nextScreen: 'understanding',
                       };
                     } else if (name === 'reject_current_opportunity') {
                       if (typeof args.barrierIdentified === 'string' && args.barrierIdentified.trim()) {

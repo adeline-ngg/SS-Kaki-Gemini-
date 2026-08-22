@@ -31,7 +31,7 @@ import {
   INITIAL_MY_WORLD_STATS,
   MY_WORLD_CATEGORIES,
 } from './data/mockData';
-import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG, createFreshGraph } from './data/opportunities';
+import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG, createFreshGraph, understandingItemsFromGraph } from './data/opportunities';
 import { runRecommendationPipeline } from './services/recommendationEngine';
 import { TestScenario } from './data/scenarios';
 import { LiveVoiceService } from './services/liveVoiceService';
@@ -78,6 +78,22 @@ export default function App() {
 
   // Reference to LiveVoiceService instance
   const liveVoiceServiceRef = useRef<LiveVoiceService | null>(null);
+  const currentScreenRef = useRef<ScreenType>('home');
+  const lifeGraphRef = useRef<LifeParticipationGraph>(DEFAULT_LIFE_PARTICIPATION_GRAPH);
+
+  const stopLiveVoice = useCallback(() => {
+    liveVoiceServiceRef.current?.stopRecording();
+    liveVoiceServiceRef.current?.stopAudioPlayback();
+    liveVoiceServiceRef.current?.disconnect();
+  }, []);
+
+  useEffect(() => {
+    currentScreenRef.current = currentScreen;
+  }, [currentScreen]);
+
+  useEffect(() => {
+    lifeGraphRef.current = lifeGraph;
+  }, [lifeGraph]);
 
   // Helper to sync recommendations from the pipeline
   const syncPipeline = useCallback((graph: LifeParticipationGraph, context?: string) => {
@@ -135,15 +151,35 @@ export default function App() {
         }
       },
       onOpportunityAccepted: (opp, updatedGraph) => {
-        setConfirmedActivity(opp);
-        if (updatedGraph) setLifeGraph(updatedGraph);
-        setMyWorldStats((prev) => ({
-          ...prev,
-          outingsThisMonth: prev.outingsThisMonth + 1,
-          peopleConnected: prev.peopleConnected + 1,
-          newExperiences: prev.newExperiences + 1,
-        }));
-        setCurrentScreen('my-world');
+        const screen = currentScreenRef.current;
+        if (opp) {
+          setRecommendationsList((prev) => {
+            const rest = prev.filter((item) => item.id !== opp.id);
+            return [opp, ...rest];
+          });
+          setCurrentRecIndex(0);
+        }
+
+        // Spoken "yes" from conversation means review understanding, then the event card.
+        // Only the recommendation Accept action should open My World.
+        if (screen === 'recommendation') {
+          if (updatedGraph) setLifeGraph(updatedGraph);
+          if (opp) setConfirmedActivity(opp);
+          setMyWorldStats((prev) => ({
+            ...prev,
+            outingsThisMonth: prev.outingsThisMonth + 1,
+            peopleConnected: prev.peopleConnected + 1,
+            newExperiences: prev.newExperiences + 1,
+          }));
+          stopLiveVoice();
+          setCurrentScreen('my-world');
+          return;
+        }
+
+        const graphForCards = updatedGraph || lifeGraphRef.current;
+        setUnderstandingItems(understandingItemsFromGraph(graphForCards));
+        stopLiveVoice();
+        setCurrentScreen('understanding');
       },
       onOpportunityRejected: (reason, barrier, updatedGraph, recs) => {
         if (updatedGraph) setLifeGraph(updatedGraph);
@@ -161,9 +197,27 @@ export default function App() {
         setMemoryConsentPrompt(prompt);
       },
       onNavigateScreen: (screen) => {
-        if (['home', 'conversation', 'understanding', 'recommendation', 'my-world'].includes(screen)) {
-          setCurrentScreen(screen as ScreenType);
+        if (!['home', 'conversation', 'understanding', 'recommendation', 'my-world'].includes(screen)) {
+          return;
         }
+
+        const current = currentScreenRef.current;
+        if (screen === 'my-world' && current !== 'recommendation') {
+          setUnderstandingItems(understandingItemsFromGraph(lifeGraphRef.current));
+          stopLiveVoice();
+          setCurrentScreen('understanding');
+          return;
+        }
+        if (screen === 'recommendation' && current === 'conversation') {
+          setUnderstandingItems(understandingItemsFromGraph(lifeGraphRef.current));
+          stopLiveVoice();
+          setCurrentScreen('understanding');
+          return;
+        }
+        if (screen !== 'conversation') {
+          stopLiveVoice();
+        }
+        setCurrentScreen(screen as ScreenType);
       },
       onError: (err) => {
         setLiveErrorMessage(err);
@@ -179,7 +233,7 @@ export default function App() {
     return () => {
       service.disconnect();
     };
-  }, [syncPipeline]);
+  }, [syncPipeline, stopLiveVoice]);
 
   // Keep live voice service updated with graph and current recommendation
   const currentRecommendation = recommendationsList[currentRecIndex] || RECOMMENDATIONS[0];
@@ -339,24 +393,17 @@ export default function App() {
   };
 
   const handleGoHome = () => {
-    if (liveVoiceServiceRef.current) {
-      liveVoiceServiceRef.current.stopRecording();
-      liveVoiceServiceRef.current.stopAudioPlayback();
-    }
+    stopLiveVoice();
     setCurrentScreen('home');
   };
 
   const handleProceedToUnderstanding = () => {
-    if (liveVoiceServiceRef.current) {
-      liveVoiceServiceRef.current.stopAudioPlayback();
-    }
+    stopLiveVoice();
     setCurrentScreen('understanding');
   };
 
   const handleDirectToRetirementRecommendation = () => {
-    if (liveVoiceServiceRef.current) {
-      liveVoiceServiceRef.current.stopAudioPlayback();
-    }
+    stopLiveVoice();
     // Explicitly select the retirement planning workshop
     const cpfIndex = recommendationsList.findIndex(
       (r) => r.id === 'opp-cpf-foundations' || r.purposeType === 'life_stage_learning'
@@ -374,6 +421,7 @@ export default function App() {
   };
 
   const handleConfirmUnderstanding = () => {
+    stopLiveVoice();
     setCurrentScreen('recommendation');
   };
 
@@ -393,6 +441,7 @@ export default function App() {
       peopleConnected: prev.peopleConnected + 1,
       newExperiences: prev.newExperiences + 1,
     }));
+    stopLiveVoice();
     setCurrentScreen('my-world');
   };
 
@@ -456,6 +505,9 @@ export default function App() {
   };
 
   const handleJumpToScreen = (screen: ScreenType, convState?: ConversationState) => {
+    if (screen !== 'conversation') {
+      stopLiveVoice();
+    }
     if (convState) {
       setConversationState(convState);
     }
@@ -588,6 +640,7 @@ export default function App() {
               handleStartVoice();
               return;
             }
+            stopLiveVoice();
             setCurrentScreen(screen);
           }}
           isLargeText={textScale === 'large'}

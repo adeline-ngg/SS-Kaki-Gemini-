@@ -671,3 +671,50 @@ export function createFreshGraph(override?: Partial<LifeParticipationGraph>): Li
     dislikes: override.dislikes ? [...override.dislikes] : [...base.dislikes],
   };
 }
+
+/**
+ * Builds Understanding screen cards from the live Life Participation Graph
+ * so voice conversations do not reuse the canned demo lines.
+ */
+export function understandingItemsFromGraph(graph: LifeParticipationGraph): UnderstandingItem[] {
+  const items: UnderstandingItem[] = [];
+
+  const add = (
+    en: string,
+    zh: string,
+    iconName: UnderstandingItem['iconName'],
+    category: UnderstandingItem['category']
+  ) => {
+    if (!en || items.length >= 4) return;
+    if (items.some((item) => item.en.toLowerCase() === en.toLowerCase())) return;
+    items.push({
+      id: `u-graph-${items.length + 1}`,
+      en,
+      zh: zh || en,
+      detailEn: '',
+      detailZh: '',
+      iconName,
+      confirmed: true,
+      category,
+    });
+  };
+
+  for (const interest of graph.interests || []) {
+    add(interest, interest, 'music', 'interest');
+  }
+  for (const barrier of graph.participationBarriers || []) {
+    add(barrier, barrier, 'users', 'barrier');
+  }
+  for (const access of graph.accessibilityPreferences || []) {
+    add(access, access, 'heart-handshake', 'barrier');
+  }
+  if (graph.profile?.lifeStage) {
+    const stage = graph.profile.lifeStage.replace(/_/g, ' ');
+    add(`Life stage: ${stage}`, `人生阶段：${stage}`, 'book-open', 'life_stage');
+  }
+  for (const signal of graph.contextualSignals || []) {
+    add(signal, signal, 'sparkles', 'life_stage');
+  }
+
+  return items.slice(0, 4);
+}

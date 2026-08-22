@@ -614,15 +614,9 @@ async function startServer() {
             });
           }
         } else if (msg.type === 'update_graph') {
-          currentGraph = msg.graph;
-          const recs = getRecommendationsForGraph(currentGraph);
-          clientWs.send(
-            JSON.stringify({
-              type: 'graph_updated',
-              graph: currentGraph,
-              recommendations: recs,
-            })
-          );
+          if (msg.graph) {
+            currentGraph = msg.graph;
+          }
         } else if (msg.type === 'set_active_opportunity') {
           currentOpportunityId = msg.opportunityId;
         }

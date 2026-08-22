@@ -24,11 +24,14 @@ export class LiveVoiceService {
   private mediaStream: MediaStream | null = null;
   private scriptProcessor: ScriptProcessorNode | null = null;
   private mediaSource: MediaStreamAudioSourceNode | null = null;
+  private silentGain: GainNode | null = null;
 
   private activeAudioSources: AudioBufferSourceNode[] = [];
   private nextScheduledPlayTime: number = 0;
   private isAudioPlaying: boolean = false;
   private isRecording: boolean = false;
+  private playbackHoldoffUntil: number = 0;
+  private listeningReturnTimer: number | null = null;
 
   private callbacks: LiveVoiceCallbacks;
   private currentGraph: LifeParticipationGraph | null = null;
@@ -186,9 +189,14 @@ export class LiveVoiceService {
       this.mediaSource = this.inputAudioContext.createMediaStreamSource(this.mediaStream);
       // Buffer size 2048 or 4096 provides low latency without overloading the event loop
       this.scriptProcessor = this.inputAudioContext.createScriptProcessor(4096, 1, 1);
+      // Keep the processor in the graph so onaudioprocess fires, but mute it so
+      // the microphone is not played out of the speakers (which causes a Live echo loop).
+      this.silentGain = this.inputAudioContext.createGain();
+      this.silentGain.gain.value = 0;
 
       this.mediaSource.connect(this.scriptProcessor);
-      this.scriptProcessor.connect(this.inputAudioContext.destination);
+      this.scriptProcessor.connect(this.silentGain);
+      this.silentGain.connect(this.inputAudioContext.destination);
 
       this.scriptProcessor.onaudioprocess = (e) => {
         if (!this.isRecording) return;
@@ -204,7 +212,13 @@ export class LiveVoiceService {
         const volume = Math.min(1, rms * 5);
         this.callbacks.onVolumeChange?.(volume);
 
-        // Downsample to 16kHz if needed
+        // Do not stream microphone audio while Kaki is speaking, or just after.
+        // Otherwise Gemini hears its own voice, interrupts, and the UI loops
+        // listening ↔ speaking (Done appearing and disappearing).
+        if (this.isAudioPlaying || Date.now() < this.playbackHoldoffUntil) {
+          return;
+        }
+
         const resampledData = downsampleTo16k(inputChannelData, e.inputBuffer.sampleRate);
         const pcm16 = floatTo16BitPCM(resampledData);
         const base64Data = pcmToBase64(pcm16);
@@ -238,6 +252,7 @@ export class LiveVoiceService {
    */
   public stopRecording() {
     this.isRecording = false;
+    this.clearListeningReturnTimer();
 
     if (this.scriptProcessor) {
       try {
@@ -246,6 +261,15 @@ export class LiveVoiceService {
         // ignore
       }
       this.scriptProcessor = null;
+    }
+
+    if (this.silentGain) {
+      try {
+        this.silentGain.disconnect();
+      } catch (e) {
+        // ignore
+      }
+      this.silentGain = null;
     }
 
     if (this.mediaSource) {
@@ -309,7 +333,10 @@ export class LiveVoiceService {
           break;
 
         case 'interrupted':
-          // Barge-in: user spoke while model was talking -> stop audio immediately
+          // Ignore echo-driven barge-in while we are still playing Kaki audio.
+          if (this.isAudioPlaying) {
+            break;
+          }
           console.log('[LiveVoiceService] Barge-in interrupted model speech');
           this.stopAudioPlayback();
           this.currentModelText = '';
@@ -381,6 +408,23 @@ export class LiveVoiceService {
     }
   }
 
+  private clearListeningReturnTimer() {
+    if (this.listeningReturnTimer !== null) {
+      window.clearTimeout(this.listeningReturnTimer);
+      this.listeningReturnTimer = null;
+    }
+  }
+
+  private scheduleReturnToListening() {
+    this.clearListeningReturnTimer();
+    this.listeningReturnTimer = window.setTimeout(() => {
+      this.listeningReturnTimer = null;
+      if (this.activeAudioSources.length === 0 && this.isRecording && !this.isAudioPlaying) {
+        this.callbacks.onStateChange('listening');
+      }
+    }, 500);
+  }
+
   /**
    * Decodes base64 24kHz PCM chunk and schedules gapless playback
    */
@@ -396,6 +440,10 @@ export class LiveVoiceService {
       }
 
       const audioBuffer = base64ToAudioBuffer(base64Data, this.outputAudioContext, 24000);
+      if (audioBuffer.duration < 0.02) {
+        return;
+      }
+
       const source = this.outputAudioContext.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(this.outputAudioContext.destination);
@@ -407,6 +455,7 @@ export class LiveVoiceService {
       this.nextScheduledPlayTime = startTime + audioBuffer.duration;
 
       this.activeAudioSources.push(source);
+      this.clearListeningReturnTimer();
 
       if (!this.isAudioPlaying) {
         this.isAudioPlaying = true;
@@ -420,9 +469,9 @@ export class LiveVoiceService {
         }
         if (this.activeAudioSources.length === 0) {
           this.isAudioPlaying = false;
-          // When speaking ends and recording is still active, return to listening
+          this.playbackHoldoffUntil = Date.now() + 600;
           if (this.isRecording) {
-            this.callbacks.onStateChange('listening');
+            this.scheduleReturnToListening();
           }
         }
       };
@@ -435,6 +484,7 @@ export class LiveVoiceService {
    * Stops all active audio source nodes immediately
    */
   public stopAudioPlayback() {
+    this.clearListeningReturnTimer();
     this.activeAudioSources.forEach((source) => {
       try {
         source.stop();
@@ -449,6 +499,7 @@ export class LiveVoiceService {
       this.nextScheduledPlayTime = this.outputAudioContext.currentTime;
     }
     this.isAudioPlaying = false;
+    this.playbackHoldoffUntil = Date.now() + 600;
 
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();

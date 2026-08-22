@@ -1,0 +1,7 @@
+{
+  "name": "Kaki",
+  "description": "Voice-first social participation assistant for adults and pre-retirees in Singapore to stay active and connected.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

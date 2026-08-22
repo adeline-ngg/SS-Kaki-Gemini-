@@ -636,6 +636,13 @@ export const DEFAULT_LIFE_PARTICIPATION_GRAPH: LifeParticipationGraph = {
   currentSeries: [],
   recentOpportunityHistory: [],
   dislikes: ['Vigorous jumping / running', 'Aggressive commercial sales'],
+  sessionInsights: {
+    interests: [],
+    participationBarriers: [],
+    accessibilityPreferences: [],
+    purposeDrivers: [],
+    contextualSignals: [],
+  },
 };
 
 /**
@@ -669,14 +676,92 @@ export function createFreshGraph(override?: Partial<LifeParticipationGraph>): Li
     currentSeries: override.currentSeries ? JSON.parse(JSON.stringify(override.currentSeries)) : JSON.parse(JSON.stringify(base.currentSeries)),
     recentOpportunityHistory: override.recentOpportunityHistory ? JSON.parse(JSON.stringify(override.recentOpportunityHistory)) : JSON.parse(JSON.stringify(base.recentOpportunityHistory)),
     dislikes: override.dislikes ? [...override.dislikes] : [...base.dislikes],
+    sessionInsights: override.sessionInsights
+      ? {
+          interests: [...(override.sessionInsights.interests || [])],
+          participationBarriers: [...(override.sessionInsights.participationBarriers || [])],
+          accessibilityPreferences: [...(override.sessionInsights.accessibilityPreferences || [])],
+          purposeDrivers: [...(override.sessionInsights.purposeDrivers || [])],
+          contextualSignals: [...(override.sessionInsights.contextualSignals || [])],
+        }
+      : {
+          interests: [],
+          participationBarriers: [],
+          accessibilityPreferences: [],
+          purposeDrivers: [],
+          contextualSignals: [],
+        },
+  };
+}
+
+function uniqueTexts(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = (value || '').trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+export function emptySessionInsights(): NonNullable<LifeParticipationGraph['sessionInsights']> {
+  return {
+    interests: [],
+    participationBarriers: [],
+    accessibilityPreferences: [],
+    purposeDrivers: [],
+    contextualSignals: [],
+  };
+}
+
+/** Merge newly heard Talk facts into both the durable graph and this-session insight lock. */
+export function mergeConversationInsights(
+  graph: LifeParticipationGraph,
+  delta: {
+    interests?: string[];
+    participationBarriers?: string[];
+    accessibilityPreferences?: string[];
+    purposeDrivers?: string[];
+    contextualSignals?: string[];
+  }
+): LifeParticipationGraph {
+  const session = graph.sessionInsights || emptySessionInsights();
+  return {
+    ...graph,
+    interests: uniqueTexts([...graph.interests, ...(delta.interests || [])]),
+    participationBarriers: uniqueTexts([...graph.participationBarriers, ...(delta.participationBarriers || [])]),
+    accessibilityPreferences: uniqueTexts([
+      ...graph.accessibilityPreferences,
+      ...(delta.accessibilityPreferences || []),
+    ]),
+    purposeDrivers: uniqueTexts([...graph.purposeDrivers, ...(delta.purposeDrivers || [])]),
+    contextualSignals: uniqueTexts([...graph.contextualSignals, ...(delta.contextualSignals || [])]),
+    sessionInsights: {
+      interests: uniqueTexts([...session.interests, ...(delta.interests || [])]),
+      participationBarriers: uniqueTexts([...session.participationBarriers, ...(delta.participationBarriers || [])]),
+      accessibilityPreferences: uniqueTexts([
+        ...session.accessibilityPreferences,
+        ...(delta.accessibilityPreferences || []),
+      ]),
+      purposeDrivers: uniqueTexts([...session.purposeDrivers, ...(delta.purposeDrivers || [])]),
+      contextualSignals: uniqueTexts([...session.contextualSignals, ...(delta.contextualSignals || [])]),
+    },
   };
 }
 
 /**
- * Builds Understanding screen cards from the live Life Participation Graph
- * so voice conversations do not reuse the canned demo lines.
+ * Builds Understanding screen cards from the live Life Participation Graph.
+ * Conversation-session insights are locked first so canned demo interests
+ * (dancing, tea, gardens) cannot hide what the person just said.
  */
-export function understandingItemsFromGraph(graph: LifeParticipationGraph): UnderstandingItem[] {
+export function understandingItemsFromGraph(
+  graph: LifeParticipationGraph,
+  spokenFallback?: string
+): UnderstandingItem[] {
   const items: UnderstandingItem[] = [];
 
   const add = (
@@ -698,6 +783,32 @@ export function understandingItemsFromGraph(graph: LifeParticipationGraph): Unde
       category,
     });
   };
+
+  const session = graph.sessionInsights || emptySessionInsights();
+  const spoken = (spokenFallback || '').replace(/[“”"]/g, '').trim();
+
+  for (const interest of session.interests) {
+    add(interest, interest, 'music', 'interest');
+  }
+  for (const barrier of session.participationBarriers) {
+    add(barrier, barrier, 'users', 'barrier');
+  }
+  for (const access of session.accessibilityPreferences) {
+    add(access, access, 'heart-handshake', 'barrier');
+  }
+  for (const purpose of session.purposeDrivers) {
+    add(purpose, purpose, 'award', 'purpose');
+  }
+  for (const signal of session.contextualSignals) {
+    add(signal, signal, 'sparkles', 'life_stage');
+  }
+
+  if (items.length === 0 && spoken) {
+    const snippet = spoken.length > 140 ? `${spoken.slice(0, 137)}…` : spoken;
+    add(snippet, snippet, 'music', 'interest');
+  }
+
+  if (items.length >= 4) return items.slice(0, 4);
 
   for (const interest of graph.interests || []) {
     add(interest, interest, 'music', 'interest');

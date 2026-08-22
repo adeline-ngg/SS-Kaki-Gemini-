@@ -29,3 +29,8 @@ export function shouldConsumeLiveSessionEvent(
 ): boolean {
   return !handoffLocked && current === 'conversation';
 }
+
+/** Graph updates may still arrive as the last Talk turn is wrapping up. Lock them onto Understanding. */
+export function shouldApplyLiveGraphUpdate(current: ScreenType): boolean {
+  return current === 'conversation' || current === 'understanding';
+}

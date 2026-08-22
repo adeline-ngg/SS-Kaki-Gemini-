@@ -96,6 +96,14 @@ export interface LifeParticipationGraph {
   }[];
   recentOpportunityHistory: OpportunityHistoryItem[];
   dislikes: string[];
+  /** Interests/barriers/signals gathered in the current Talk session. Used so canned demo profile facts do not bury what the person just said. */
+  sessionInsights?: {
+    interests: string[];
+    participationBarriers: string[];
+    accessibilityPreferences: string[];
+    purposeDrivers: string[];
+    contextualSignals: string[];
+  };
 }
 
 export interface PersonaProfile {

@@ -35,7 +35,7 @@ import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG, createFreshGraph
 import { runRecommendationPipeline } from './services/recommendationEngine';
 import { TestScenario } from './data/scenarios';
 import { LiveVoiceService } from './services/liveVoiceService';
-import { resolveLiveNavigateTarget, shouldConsumeLiveSessionEvent } from './services/voiceHandoff';
+import { resolveLiveNavigateTarget, shouldConsumeLiveSessionEvent, shouldApplyLiveGraphUpdate } from './services/voiceHandoff';
 
 export default function App() {
   // Navigation & Screen State
@@ -82,6 +82,7 @@ export default function App() {
   const currentScreenRef = useRef<ScreenType>('home');
   const lifeGraphRef = useRef<LifeParticipationGraph>(DEFAULT_LIFE_PARTICIPATION_GRAPH);
   const liveHandoffLockedRef = useRef(false);
+  const conversationTranscriptRef = useRef('');
 
   const stopLiveVoice = useCallback(() => {
     liveVoiceServiceRef.current?.stopRecording();
@@ -129,10 +130,9 @@ export default function App() {
         if (liveHandoffLockedRef.current) return;
         const trimmed = (text || '').trim();
         if (!trimmed) {
-          setUserUtteranceZh('');
-          setUserUtteranceEn('');
           return;
         }
+        conversationTranscriptRef.current = `${conversationTranscriptRef.current} ${trimmed}`.trim();
         setUserUtteranceZh(`“${trimmed}”`);
         setUserUtteranceEn(`"${trimmed}"`);
       },
@@ -154,15 +154,18 @@ export default function App() {
         }
       },
       onGraphUpdated: (updatedGraph, recs) => {
-        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+        if (!shouldApplyLiveGraphUpdate(currentScreenRef.current)) {
           return;
         }
         setLifeGraph(updatedGraph);
+        setUnderstandingItems(
+          understandingItemsFromGraph(updatedGraph, conversationTranscriptRef.current)
+        );
         if (recs && recs.length > 0) {
           setRecommendationsList(recs);
           setCurrentRecIndex(0);
         } else {
-          syncPipeline(updatedGraph);
+          syncPipeline(updatedGraph, conversationTranscriptRef.current);
         }
       },
       onRecommendationsRequested: (recs) => {
@@ -174,21 +177,21 @@ export default function App() {
           setCurrentRecIndex(0);
         }
       },
-      onOpportunityAccepted: (opp, updatedGraph) => {
+      onOpportunityAccepted: (opp, updatedGraph, recs) => {
         if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
           return;
         }
-        if (opp) {
-          setRecommendationsList((prev) => {
-            const rest = prev.filter((item) => item.id !== opp.id);
-            return [opp, ...rest];
-          });
-          setCurrentRecIndex(0);
-        }
-        if (updatedGraph) setLifeGraph(updatedGraph);
-
         const graphForCards = updatedGraph || lifeGraphRef.current;
-        setUnderstandingItems(understandingItemsFromGraph(graphForCards));
+        if (updatedGraph) setLifeGraph(updatedGraph);
+        if (recs && recs.length > 0) {
+          setRecommendationsList(recs);
+          setCurrentRecIndex(0);
+        } else {
+          syncPipeline(graphForCards, conversationTranscriptRef.current);
+        }
+        setUnderstandingItems(
+          understandingItemsFromGraph(graphForCards, conversationTranscriptRef.current)
+        );
         beginVoiceReview();
         setCurrentScreen('understanding');
       },
@@ -223,7 +226,10 @@ export default function App() {
         const target = resolveLiveNavigateTarget(screen, currentScreenRef.current);
         if (!target) return;
         if (target === 'understanding') {
-          setUnderstandingItems(understandingItemsFromGraph(lifeGraphRef.current));
+          setUnderstandingItems(
+            understandingItemsFromGraph(lifeGraphRef.current, conversationTranscriptRef.current)
+          );
+          syncPipeline(lifeGraphRef.current, conversationTranscriptRef.current);
         }
         if (target !== 'conversation') {
           beginVoiceReview();
@@ -252,11 +258,11 @@ export default function App() {
   useEffect(() => {
     if (liveVoiceServiceRef.current) {
       liveVoiceServiceRef.current.setGraph(lifeGraph);
-      if (currentRecommendation) {
+      if (currentScreen === 'recommendation' && currentRecommendation) {
         liveVoiceServiceRef.current.setActiveOpportunityId(currentRecommendation.id);
       }
     }
-  }, [lifeGraph, currentRecommendation]);
+  }, [lifeGraph, currentRecommendation, currentScreen]);
 
   // Process Utterance via REST Chat API (Fallback or touch input)
   const handleProcessUtterance = async (utterance: string) => {
@@ -264,6 +270,7 @@ export default function App() {
     setConversationState('thinking');
     setUserUtteranceZh(`“${utterance}”`);
     setUserUtteranceEn(`"${utterance}"`);
+    conversationTranscriptRef.current = `${conversationTranscriptRef.current} ${utterance}`.trim();
 
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 25000);
@@ -274,7 +281,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          userUtterance: utterance,
+          userUtterance: conversationTranscriptRef.current || utterance,
           currentGraph: lifeGraph,
           languageMode,
         }),
@@ -379,6 +386,7 @@ export default function App() {
     setKakiResponseEn('"So dancing is still something you love. Toa Payoh CC has a relaxed tea dance and evergreen music gathering. Would you like to check it out?"');
     setMemoryConsentPrompt(null);
     setLiveErrorMessage(null);
+    conversationTranscriptRef.current = '';
     if (liveVoiceServiceRef.current) {
       liveVoiceServiceRef.current.resetConversation();
       liveVoiceServiceRef.current.setGraph(cleanBaseline);
@@ -389,12 +397,24 @@ export default function App() {
   // Start Voice Session
   const handleStartVoice = async () => {
     liveHandoffLockedRef.current = false;
+    conversationTranscriptRef.current = '';
+    setLifeGraph((prev) => ({
+      ...prev,
+      sessionInsights: {
+        interests: [],
+        participationBarriers: [],
+        accessibilityPreferences: [],
+        purposeDrivers: [],
+        contextualSignals: [],
+      },
+    }));
     setCurrentScreen('conversation');
     setConversationState('listening');
     setLiveErrorMessage(null);
     setUserUtteranceZh('');
     setUserUtteranceEn('');
     liveVoiceServiceRef.current?.resetConversation();
+    liveVoiceServiceRef.current?.setActiveOpportunityId(null);
 
     if (liveVoiceMode === 'live' && liveVoiceServiceRef.current) {
       const success = await liveVoiceServiceRef.current.startRecording();
@@ -411,6 +431,10 @@ export default function App() {
 
   const handleProceedToUnderstanding = () => {
     stopLiveVoice();
+    setUnderstandingItems(
+      understandingItemsFromGraph(lifeGraph, conversationTranscriptRef.current)
+    );
+    syncPipeline(lifeGraph, conversationTranscriptRef.current);
     setCurrentScreen('understanding');
   };
 
@@ -434,6 +458,7 @@ export default function App() {
 
   const handleConfirmUnderstanding = () => {
     stopLiveVoice();
+    syncPipeline(lifeGraph, conversationTranscriptRef.current);
     setCurrentScreen('recommendation');
   };
 

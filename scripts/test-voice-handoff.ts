@@ -1,7 +1,15 @@
 import {
   resolveLiveNavigateTarget,
   shouldConsumeLiveSessionEvent,
+  shouldApplyLiveGraphUpdate,
 } from '../src/services/voiceHandoff.ts';
+import {
+  createFreshGraph,
+  mergeConversationInsights,
+  understandingItemsFromGraph,
+  OPPORTUNITY_CATALOG,
+} from '../src/data/opportunities.ts';
+import { runRecommendationPipeline } from '../src/services/recommendationEngine.ts';
 
 let failed = 0;
 
@@ -47,20 +55,49 @@ assert(
   resolveLiveNavigateTarget('settings', 'conversation') === null
 );
 assert(
-  'graph updates apply during Talk',
+  'screen navigation from Live only applies during Talk',
   shouldConsumeLiveSessionEvent('conversation', false) === true
 );
 assert(
-  'graph updates stop after handoff lock',
+  'screen navigation stops after handoff lock',
   shouldConsumeLiveSessionEvent('conversation', true) === false
 );
 assert(
-  'graph updates stop on My World even if lock was missed',
+  'screen navigation stops on My World',
   shouldConsumeLiveSessionEvent('my-world', false) === false
 );
 assert(
-  'graph updates stop on Understanding',
-  shouldConsumeLiveSessionEvent('understanding', false) === false
+  'late graph updates can still lock onto Understanding',
+  shouldApplyLiveGraphUpdate('understanding') === true
+);
+assert(
+  'graph updates do not keep rewriting My World',
+  shouldApplyLiveGraphUpdate('my-world') === false
+);
+
+const horseGraph = mergeConversationInsights(createFreshGraph(), {
+  interests: ['horses', 'animals'],
+});
+const horseCards = understandingItemsFromGraph(horseGraph, 'I like horses and animals');
+assert(
+  'Understanding locks horses/animals ahead of canned dancing cards',
+  horseCards.some((item) => /horse|animal/i.test(item.en)) &&
+    !horseCards[0].en.toLowerCase().includes('ballroom')
+);
+
+const horseRecs = runRecommendationPipeline(
+  horseGraph,
+  OPPORTUNITY_CATALOG,
+  'I like horses and animals'
+);
+const horseTopIds = horseRecs.topOpportunities.slice(0, 3).map((opp) => opp.id);
+assert(
+  'Horse/animal talk ranks nature/garden, not only this-week LPA/retirement cards',
+  horseTopIds.includes('opp-botanic-soundwalk') || horseTopIds.includes('opp-garden-tea')
+);
+assert(
+  'Horse/animal talk does not pin LPA as the first card',
+  horseRecs.topOpportunities[0]?.id !== 'opp-lpa-basics'
 );
 
 if (failed > 0) {

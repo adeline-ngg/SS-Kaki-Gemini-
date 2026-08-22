@@ -8,7 +8,11 @@ export interface LiveVoiceCallbacks {
   onVolumeChange?: (volume: number) => void;
   onGraphUpdated?: (graph: LifeParticipationGraph, recommendations?: Opportunity[]) => void;
   onRecommendationsRequested?: (recommendations: Opportunity[], triggerReason?: string) => void;
-  onOpportunityAccepted?: (opportunity: Opportunity, updatedGraph: LifeParticipationGraph) => void;
+  onOpportunityAccepted?: (
+    opportunity: Opportunity | null,
+    updatedGraph: LifeParticipationGraph,
+    recommendations?: Opportunity[]
+  ) => void;
   onOpportunityRejected?: (reason: string, barrier?: string, updatedGraph?: LifeParticipationGraph, recommendations?: Opportunity[]) => void;
   onExplainRequested?: (opportunity: Opportunity) => void;
   onMemoryConsentRequested?: (consent: MemoryConsentPrompt) => void;
@@ -59,7 +63,7 @@ export class LiveVoiceService {
     }
   }
 
-  public setActiveOpportunityId(opportunityId: string) {
+  public setActiveOpportunityId(opportunityId: string | null) {
     this.activeOpportunityId = opportunityId;
     if (this.sessionOpen && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'set_active_opportunity', opportunityId }));
@@ -428,9 +432,7 @@ export class LiveVoiceService {
           break;
 
         case 'opportunity_accepted':
-          if (msg.opportunity) {
-            this.callbacks.onOpportunityAccepted?.(msg.opportunity, msg.updatedGraph);
-          }
+          this.callbacks.onOpportunityAccepted?.(msg.opportunity || null, msg.updatedGraph, msg.recommendations);
           break;
 
         case 'opportunity_rejected':

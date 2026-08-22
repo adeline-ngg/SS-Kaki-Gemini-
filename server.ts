@@ -5,7 +5,7 @@ import path from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Modality, Type, LiveServerMessage } from '@google/genai';
-import { OPPORTUNITY_CATALOG, DEFAULT_LIFE_PARTICIPATION_GRAPH } from './src/data/opportunities';
+import { OPPORTUNITY_CATALOG, DEFAULT_LIFE_PARTICIPATION_GRAPH, mergeConversationInsights, understandingItemsFromGraph } from './src/data/opportunities';
 import { runRecommendationPipeline, getPurposeFraming } from './src/services/recommendationEngine';
 import { TEST_SCENARIOS } from './src/data/scenarios';
 import { LifeParticipationGraph, Opportunity } from './src/types';
@@ -106,11 +106,12 @@ VOICE & TONE GUIDELINES:
    - Example: "I don't want to go alone" -> Barrier = Needs doorway welcome buddy / small group.
    - Example: "I'm retiring next year and don't understand CPF" -> Context = Approaching retirement (do NOT add CPF as a hobby/interest!).
 8. TOOL & ACTION CALLING:
-   - When the user shares interests, barriers, or life stage signals, call "update_life_participation_graph".
-   - When enough context exists or the user is open to seeing activities, call "request_opportunity_recommendation".
+   - When the user shares interests, barriers, or life stage signals, call "update_life_participation_graph" immediately — including specific likes such as horses, animals, gardens, or music. Keep calling it as new facts appear. Do not wait until the end.
+   - When enough context exists or the user is open to seeing activities, call "request_opportunity_recommendation". Rank from what they just said, not a generic "what's on today" list.
    - When the user is ready to review what you understood, or says "这个可以" / "Sounds good" / "Okay lah" / "yes" during conversation, call "accept_current_opportunity" once. That only opens the understanding check. Do NOT call navigate_to_screen afterward, and NEVER mark the activity completed.
    - Never call "navigate_to_screen" with "recommendation" or "my-world". Event details and My World are tap-only after the person confirms understanding, then confirms the event card.
    - Only call "navigate_to_screen" with "understanding" or "home".
+   - Do not treat a conversational "yes" as confirmation of a specific event that happens to be on today. First lock the insights from this conversation.
    - When the user says "不要这个" / "太远了", call "reject_current_opportunity" (and record distance/transport barrier).
    - When the user asks "为什么推荐这个？", call "explain_current_recommendation".
    - For meaningful long-term preferences, call "request_memory_consent" (e.g. "Would you like me to remember that?").
@@ -126,7 +127,7 @@ const LIVE_FUNCTION_DECLARATIONS = [
         interests: {
           type: Type.ARRAY,
           items: { type: Type.STRING },
-          description: 'New activity or lifestyle interests the user enjoys or wants to explore (e.g. dancing, brisk walking, gardening, singing, chess, herbal cooking).',
+          description: 'New activity or lifestyle interests the user enjoys or wants to explore (e.g. horses, animals, dancing, brisk walking, gardening, singing). Capture the specific thing they named.',
         },
         participationBarriers: {
           type: Type.ARRAY,
@@ -276,6 +277,7 @@ async function startServer() {
     let liveSession: any = null;
     let isSessionReady = false;
     let clientReviewStarted = false;
+    let userTranscriptAccum = '';
 
     const sendClient = (payload: Record<string, unknown>) => {
       if (clientWs.readyState === WebSocket.OPEN) {
@@ -360,11 +362,13 @@ async function startServer() {
                 }
 
                 if (sc?.inputAudioTranscription?.text || sc?.inputTranscription?.text) {
+                  const userText = sc.inputAudioTranscription?.text || sc.inputTranscription?.text;
+                  userTranscriptAccum = `${userTranscriptAccum} ${userText}`.trim();
                   clientWs.send(
                     JSON.stringify({
                       type: 'transcript',
                       role: 'user',
-                      text: sc.inputAudioTranscription?.text || sc.inputTranscription?.text,
+                      text: userText,
                     })
                   );
                 }
@@ -382,7 +386,10 @@ async function startServer() {
 
                 // 5. Function Calling
                 if (message.toolCall?.functionCalls) {
-                  const functionCalls = message.toolCall.functionCalls;
+                  const functionCalls = [...message.toolCall.functionCalls].sort((a, b) => {
+                    const rank = (name?: string) => (name === 'update_life_participation_graph' ? 0 : 1);
+                    return rank(a.name) - rank(b.name);
+                  });
                   const responses = [];
 
                   for (const call of functionCalls) {
@@ -392,11 +399,11 @@ async function startServer() {
 
                     let result: any = { success: true };
 
-                    if (clientReviewStarted) {
+                    if (clientReviewStarted && name !== 'update_life_participation_graph') {
                       result = {
                         success: true,
                         ignored: true,
-                        reason: 'The understanding check is on screen. Stop using leftover speech. Do not navigate or update the graph.',
+                        reason: 'The understanding check is on screen. Stop using leftover speech. Do not navigate or change the event.',
                       };
                       responses.push({
                         name,
@@ -407,58 +414,47 @@ async function startServer() {
                     }
 
                     if (name === 'update_life_participation_graph') {
-                      const newInterests: string[] = Array.isArray(args.interests) ? args.interests : [];
-                      const newBarriers: string[] = Array.isArray(args.participationBarriers) ? args.participationBarriers : [];
-                      const newAccess: string[] = Array.isArray(args.accessibilityPreferences) ? args.accessibilityPreferences : [];
-                      const newPurpose: string[] = Array.isArray(args.purposeDrivers) ? args.purposeDrivers : [];
-                      const newSignals: string[] = Array.isArray(args.contextualSignals) ? args.contextualSignals : [];
+                      currentGraph = mergeConversationInsights(currentGraph, {
+                        interests: Array.isArray(args.interests) ? args.interests : [],
+                        participationBarriers: Array.isArray(args.participationBarriers)
+                          ? args.participationBarriers
+                          : [],
+                        accessibilityPreferences: Array.isArray(args.accessibilityPreferences)
+                          ? args.accessibilityPreferences
+                          : [],
+                        purposeDrivers: Array.isArray(args.purposeDrivers) ? args.purposeDrivers : [],
+                        contextualSignals: Array.isArray(args.contextualSignals) ? args.contextualSignals : [],
+                      });
 
-                      currentGraph = {
-                        ...currentGraph,
-                        interests: Array.from(new Set([...currentGraph.interests, ...newInterests])),
-                        participationBarriers: Array.from(
-                          new Set([...currentGraph.participationBarriers, ...newBarriers])
-                        ),
-                        accessibilityPreferences: Array.from(
-                          new Set([...currentGraph.accessibilityPreferences, ...newAccess])
-                        ),
-                        purposeDrivers: Array.from(
-                          new Set([...currentGraph.purposeDrivers, ...newPurpose])
-                        ),
-                        contextualSignals: Array.from(
-                          new Set([...currentGraph.contextualSignals, ...newSignals])
-                        ),
-                      };
-
-                      const recs = getRecommendationsForGraph(currentGraph);
-                      clientWs.send(
-                        JSON.stringify({
-                          type: 'graph_updated',
-                          graph: currentGraph,
-                          recommendations: recs,
-                        })
-                      );
+                      const recs = getRecommendationsForGraph(currentGraph, userTranscriptAccum);
+                      sendClient({
+                        type: 'graph_updated',
+                        graph: currentGraph,
+                        recommendations: recs,
+                      });
 
                       result = {
                         success: true,
                         updatedGraph: currentGraph,
+                        lockedSessionInsights: currentGraph.sessionInsights,
                         activeTopRecommendationsCount: recs.length,
                         firstTopRecommendation: recs[0] ? recs[0].titleEn : null,
                       };
                     } else if (name === 'request_opportunity_recommendation') {
                       const reasonStr = typeof args.reason === 'string' ? args.reason : undefined;
-                      const recs = getRecommendationsForGraph(currentGraph, reasonStr);
+                      const recs = getRecommendationsForGraph(
+                        currentGraph,
+                        [userTranscriptAccum, reasonStr].filter(Boolean).join(' ')
+                      );
                       if (recs[0]) {
                         currentOpportunityId = recs[0].id;
                       }
 
-                      clientWs.send(
-                        JSON.stringify({
-                          type: 'show_recommendations',
-                          recommendations: recs,
-                          triggerReason: args.reason,
-                        })
-                      );
+                      sendClient({
+                        type: 'show_recommendations',
+                        recommendations: recs,
+                        triggerReason: args.reason,
+                      });
 
                       result = {
                         topOpportunities: recs.slice(0, 3).map((r) => ({
@@ -474,26 +470,24 @@ async function startServer() {
                         })),
                       };
                     } else if (name === 'accept_current_opportunity') {
-                      const acceptedId = args.opportunityId || currentOpportunityId;
-                      const recs = getRecommendationsForGraph(currentGraph);
-                      const matched =
-                        OPPORTUNITY_CATALOG.find((o) => o.id === acceptedId) || recs[0] || OPPORTUNITY_CATALOG[0];
-                      if (matched) {
-                        currentOpportunityId = matched.id;
+                      const recs = getRecommendationsForGraph(currentGraph, userTranscriptAccum);
+                      if (recs[0]) {
+                        currentOpportunityId = recs[0].id;
                       }
-
                       clientReviewStarted = true;
                       sendClient({
                         type: 'opportunity_accepted',
-                        opportunity: matched,
+                        opportunity: recs[0] || null,
                         updatedGraph: currentGraph,
+                        recommendations: recs,
                       });
 
                       result = {
                         success: true,
-                        acceptedActivity: matched.titleEn,
-                        message: 'Show the understanding check only. Do not navigate to event details or My World, and do not mark it completed.',
+                        acceptedActivity: recs[0]?.titleEn,
+                        message: 'Show the understanding check only. Insights from this conversation are locked. Do not navigate to event details or My World.',
                         nextScreen: 'understanding',
+                        lockedSessionInsights: currentGraph.sessionInsights,
                       };
                     } else if (name === 'reject_current_opportunity') {
                       if (typeof args.barrierIdentified === 'string' && args.barrierIdentified.trim()) {
@@ -620,9 +614,8 @@ async function startServer() {
           if (msg.graph) {
             currentGraph = msg.graph;
           }
-          if (msg.opportunityId) {
-            currentOpportunityId = msg.opportunityId;
-          }
+          currentOpportunityId = msg.opportunityId || null;
+          userTranscriptAccum = '';
         } else if (msg.type === 'audio') {
           // 16kHz PCM audio chunk from microphone
           if (clientReviewStarted) {
@@ -639,6 +632,9 @@ async function startServer() {
         } else if (msg.type === 'text') {
           if (clientReviewStarted) {
             return;
+          }
+          if (typeof msg.text === 'string' && msg.text.trim()) {
+            userTranscriptAccum = `${userTranscriptAccum} ${msg.text.trim()}`.trim();
           }
           // Spoken text transcription or fallback text message
           if (liveSession && isSessionReady) {
@@ -837,33 +833,29 @@ Return strictly JSON matching this structure:
         console.error('Failed to parse Gemini JSON output:', rawText);
       }
 
-      const updatedGraph: LifeParticipationGraph = {
-        ...graph,
-        interests: Array.from(new Set([...graph.interests, ...(parsedData.graphUpdates?.interests || [])])),
-        participationBarriers: Array.from(
-          new Set([...graph.participationBarriers, ...(parsedData.graphUpdates?.participationBarriers || [])])
-        ),
-        purposeDrivers: Array.from(
-          new Set([...graph.purposeDrivers, ...(parsedData.graphUpdates?.purposeDrivers || [])])
-        ),
-        contextualSignals: Array.from(
-          new Set([...graph.contextualSignals, ...(parsedData.graphUpdates?.contextualSignals || [])])
-        ),
-      };
+      const updatedGraph: LifeParticipationGraph = mergeConversationInsights(graph, {
+        interests: parsedData.graphUpdates?.interests || [],
+        participationBarriers: parsedData.graphUpdates?.participationBarriers || [],
+        accessibilityPreferences: parsedData.graphUpdates?.accessibilityPreferences || [],
+        purposeDrivers: parsedData.graphUpdates?.purposeDrivers || [],
+        contextualSignals: parsedData.graphUpdates?.contextualSignals || [],
+      });
 
       const recResult = runRecommendationPipeline(updatedGraph, OPPORTUNITY_CATALOG, userUtterance);
+      const lockedItems = understandingItemsFromGraph(updatedGraph, userUtterance);
+      const geminiItems =
+        parsedData.understandingItems?.map((u: any, idx: number) => ({
+          ...u,
+          id: u.id || `u-${idx + 1}`,
+          confirmed: true,
+        })) || [];
 
       res.json({
         spokenResponse: parsedData.spokenResponse || {
           en: 'So that is what you enjoy. If there is a comfortable companion, would you feel open to going?',
           zh: '原来你还是很喜欢这类活动。如果有伴同行，你会愿意一起去看看吗？',
         },
-        understandingItems:
-          parsedData.understandingItems?.map((u: any, idx: number) => ({
-            ...u,
-            id: u.id || `u-${idx + 1}`,
-            confirmed: true,
-          })) || [],
+        understandingItems: lockedItems.length > 0 ? lockedItems : geminiItems,
         updatedGraph,
         topRecommendations: recResult.topOpportunities,
       });

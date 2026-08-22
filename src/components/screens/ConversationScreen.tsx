@@ -65,8 +65,8 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
   onGoHome,
   onProceedToUnderstanding,
   onDirectToRecommendation,
-  userUtteranceZh = '“以前我跟我老公很喜欢去跳舞。Ballroom 那种。现在比较少去了。”',
-  userUtteranceEn = '"My late husband and I used to love ballroom dancing. We rarely go these days."',
+  userUtteranceZh = '',
+  userUtteranceEn = '',
   kakiResponseZh = '“原来你还是很喜欢跳舞。现在如果有人陪你一起去，你会比较愿意吗？”',
   kakiResponseEn = '"So dancing is still something you love. If someone could accompany you, would you feel more open to going?"',
   onProcessUtterance,
@@ -82,6 +82,11 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
   const [isKeyboardMode, setIsKeyboardMode] = useState(false);
   const [typedInput, setTypedInput] = useState('');
 
+  const hasDetectedSpeech = Boolean(
+    (userUtteranceZh || '').replace(/[“”"'\s.…]/g, '') ||
+    (userUtteranceEn || '').replace(/[“”"'\s.…]/g, '')
+  );
+
   // Check if current context is high-stakes boundary (e.g. Scenario E)
   const isHighStakesContext =
     userUtteranceZh?.includes('股票') ||
@@ -93,6 +98,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
 
   // Handle user completing speech in manual/fallback mode
   const handleUserDone = async () => {
+    if (!hasDetectedSpeech || isLoadingBackend) return;
     if (onProcessUtterance) {
       await onProcessUtterance(userUtteranceEn || userUtteranceZh);
     }
@@ -258,21 +264,44 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
               </p>
             </div>
 
-            {/* Live Transcript Box */}
+            {/* Live Transcript Box — empty until speech is actually detected */}
             <div className="p-4 sm:p-5 rounded-3xl bg-white/80 border border-[#EDE0D4] shadow-xs relative text-center min-h-[85px] flex flex-col justify-center">
-              <p
-                className={`font-medium text-[#2D2C2A] leading-relaxed break-words ${
-                  isLarge ? 'text-lg sm:text-xl' : 'text-base sm:text-lg'
-                }`}
-              >
-                {userUtteranceZh || '“请说话…”'}
-              </p>
-              {languageMode !== 'zh' && userUtteranceEn && (
-                <p
-                  className="mt-1.5 text-[#2D2C2A]/60 italic font-normal text-xs sm:text-sm leading-normal break-words"
-                >
-                  {userUtteranceEn}
-                </p>
+              {hasDetectedSpeech ? (
+                <>
+                  <p
+                    className={`font-medium text-[#2D2C2A] leading-relaxed break-words ${
+                      isLarge ? 'text-lg sm:text-xl' : 'text-base sm:text-lg'
+                    }`}
+                  >
+                    {userUtteranceZh}
+                  </p>
+                  {languageMode !== 'zh' && userUtteranceEn && (
+                    <p className="mt-1.5 text-[#2D2C2A]/60 italic font-normal text-xs sm:text-sm leading-normal break-words">
+                      {userUtteranceEn}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div className="space-y-0.5">
+                  {languageMode !== 'zh' && (
+                    <p
+                      className={`font-medium text-[#2D2C2A]/40 leading-relaxed ${
+                        isLarge ? 'text-lg sm:text-xl' : 'text-base sm:text-lg'
+                      }`}
+                    >
+                      Waiting to hear you…
+                    </p>
+                  )}
+                  {languageMode !== 'en' && (
+                    <p
+                      className={`font-medium text-[#2D2C2A]/40 leading-relaxed ${
+                        isLarge ? 'text-base sm:text-lg' : 'text-sm sm:text-base'
+                      }`}
+                    >
+                      请开始说话…
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -424,7 +453,8 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
               type="button"
               id="conv-done-speaking-btn"
               onClick={handleUserDone}
-              className="w-full h-13 sm:h-15 rounded-full bg-[#1B3022] hover:bg-[#25402E] text-white font-semibold text-base sm:text-lg shadow-md flex items-center justify-center gap-2.5 transition-all active:scale-98 cursor-pointer touch-manipulation"
+              disabled={!hasDetectedSpeech || isLoadingBackend}
+              className="w-full h-13 sm:h-15 rounded-full bg-[#1B3022] hover:bg-[#25402E] disabled:opacity-40 disabled:hover:bg-[#1B3022] text-white font-semibold text-base sm:text-lg shadow-md flex items-center justify-center gap-2.5 transition-all active:scale-98 cursor-pointer disabled:cursor-default touch-manipulation"
             >
               <Check className="w-5 h-5 stroke-[3]" />
               <span>Done / 说完了</span>

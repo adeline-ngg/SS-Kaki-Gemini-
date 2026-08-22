@@ -62,6 +62,35 @@ export function runRecommendationPipeline(
   const lifeStage = (graph.profile?.lifeStage || '').toLowerCase();
   const contextPrompt = (activeContextPrompt || '').toLowerCase();
   const history = graph.recentOpportunityHistory || [];
+  const sessionInterests = (graph.sessionInsights?.interests || []).map((i) => i.toLowerCase());
+  const sessionBarriers = (graph.sessionInsights?.participationBarriers || []).map((b) => b.toLowerCase());
+  const sessionPurpose = (graph.sessionInsights?.purposeDrivers || []).map((p) => p.toLowerCase());
+  const sessionSignals = (graph.sessionInsights?.contextualSignals || []).map((c) => c.toLowerCase());
+  const hasSessionInterestFocus = sessionInterests.length > 0;
+  const sessionTalksRetirement =
+    sessionSignals.some(
+      (c) => c.includes('retire') || c.includes('cpf') || c.includes('lpa') || c.includes('financial')
+    ) ||
+    (contextPrompt &&
+      (contextPrompt.includes('retire') ||
+        contextPrompt.includes('cpf') ||
+        contextPrompt.includes('公积金') ||
+        contextPrompt.includes('lpa') ||
+        contextPrompt.includes('养老金')));
+  // When Talk produced new interests, score from those — not the canned demo profile.
+  const interestsForMatch = hasSessionInterestFocus ? sessionInterests : interests;
+  const barriersForMatch = hasSessionInterestFocus
+    ? sessionBarriers.length > 0
+      ? sessionBarriers
+      : barriers
+    : barriers;
+  const purposeForMatch = hasSessionInterestFocus
+    ? sessionPurpose.length > 0
+      ? sessionPurpose
+      : purposeDrivers
+    : purposeDrivers;
+  const signalsForMatch = hasSessionInterestFocus && !sessionTalksRetirement ? sessionSignals : contextualSignals;
+  const lifeStageForMatch = hasSessionInterestFocus && !sessionTalksRetirement ? '' : lifeStage;
 
   for (const opp of catalog) {
     const oppTitle = opp.titleEn.toLowerCase() + ' ' + opp.titleZh.toLowerCase();
@@ -80,7 +109,7 @@ export function runRecommendationPipeline(
 
     // 1. Expressed Interest Match
     const matchesExpressedInterest =
-      interests.some((interest) =>
+      interestsForMatch.some((interest) =>
         oppTopics.some((t) => interest.includes(t) || t.includes(interest)) ||
         oppTitle.includes(interest) ||
         (interest.includes('dance') && oppTopics.includes('ballroom_dancing')) ||
@@ -105,21 +134,21 @@ export function runRecommendationPipeline(
     
     const matchesCpfLifeStage =
       isCpfTopic &&
-      (contextualSignals.some((c) => c.includes('cpf') || c.includes('financial_safety') || c.includes('retirement_planning_info_potential')) ||
+      (signalsForMatch.some((c) => c.includes('cpf') || c.includes('financial_safety') || c.includes('retirement_planning_info_potential')) ||
        (contextPrompt &&
         (contextPrompt.includes('cpf') || contextPrompt.includes('payout') || contextPrompt.includes('stock') || contextPrompt.includes('invest') || contextPrompt.includes('insurance') ||
          contextPrompt.includes('公积金') || contextPrompt.includes('股票') || contextPrompt.includes('保险') || contextPrompt.includes('理财') || contextPrompt.includes('养老金') || contextPrompt.includes('退休金') || contextPrompt.includes('领钱'))));
 
     const matchesHealthcareLifeStage =
       isHealthcareTopic &&
-      (contextualSignals.some((c) => c.includes('joint_care') || c.includes('healthcare')) ||
+      (signalsForMatch.some((c) => c.includes('joint_care') || c.includes('healthcare')) ||
        (contextPrompt &&
         (contextPrompt.includes('joint') || contextPrompt.includes('knee') || contextPrompt.includes('mobility') || contextPrompt.includes('physiotherapy') || contextPrompt.includes('health talk') ||
          contextPrompt.includes('关节') || contextPrompt.includes('膝盖') || contextPrompt.includes('保养') || contextPrompt.includes('诊所') || contextPrompt.includes('健康讲座'))));
 
     const matchesGeneralLifeStage =
       !isCpfTopic && !isHealthcareTopic && opp.purposeType === 'life_stage_learning' &&
-      (lifeStage.includes('retire') || contextualSignals.some((c) => c.includes('retire')));
+      (lifeStageForMatch.includes('retire') || signalsForMatch.some((c) => c.includes('retire')));
 
     const matchesLifeStageContext = matchesCpfLifeStage || matchesHealthcareLifeStage || matchesGeneralLifeStage;
 
@@ -137,7 +166,7 @@ export function runRecommendationPipeline(
 
     // 3. Purpose Fit Match (Mentorship, Peer Sharing, Contribution)
     const matchesPurposeFit =
-      (purposeDrivers.some((driver) =>
+      (purposeForMatch.some((driver) =>
         oppTopics.some((t) => driver.includes(t) || t.includes(driver)) ||
         (driver.includes('mentor') && opp.topics.includes('mentoring')) ||
         (driver.includes('help') && opp.socialStyle.includes('supportive'))
@@ -158,7 +187,7 @@ export function runRecommendationPipeline(
     // 4. Discovery Need Match (Craving novelty, routine diversification)
     const hasRoutineHistory = history.length >= 2 && history.every((h) => h.purposeType === 'lifestyle_social');
     const matchesDiscoveryNeed =
-      (contextualSignals.some((c) => c.includes('novelty') || c.includes('discovery') || c.includes('craving_variety') || c.includes('something_different')) ||
+      (signalsForMatch.some((c) => c.includes('novelty') || c.includes('discovery') || c.includes('craving_variety') || c.includes('something_different')) ||
        hasRoutineHistory ||
        (contextPrompt &&
         (contextPrompt.includes('something different') || contextPrompt.includes('new') || contextPrompt.includes('try') || contextPrompt.includes('craft') || contextPrompt.includes('novelty') ||
@@ -175,8 +204,8 @@ export function runRecommendationPipeline(
 
     // 5. Capability Need Match (Digital confidence, practical everyday independence)
     const matchesCapabilityNeed =
-      (contextualSignals.some((c) => c.includes('digital_struggle') || c.includes('scam_safety') || c.includes('smartphone') || c.includes('capability_need')) ||
-       barriers.some((b) => b.includes('digital') || b.includes('technology') || b.includes('phone')) ||
+      (signalsForMatch.some((c) => c.includes('digital_struggle') || c.includes('scam_safety') || c.includes('smartphone') || c.includes('capability_need')) ||
+       barriersForMatch.some((b) => b.includes('digital') || b.includes('technology') || b.includes('phone')) ||
        (contextPrompt &&
         (contextPrompt.includes('phone') || contextPrompt.includes('digital') || contextPrompt.includes('whatsapp') || contextPrompt.includes('scam') ||
          contextPrompt.includes('手机') || contextPrompt.includes('数码') || contextPrompt.includes('防诈') || contextPrompt.includes('扫码') || contextPrompt.includes('用手机')))) &&
@@ -192,12 +221,43 @@ export function runRecommendationPipeline(
 
     // 6. Participation Barrier Resolution Fit (Doorway welcome buddy)
     const matchesBarrierResolution =
-      barriers.some((b) => b.includes('unfamiliar') || b.includes('alone') || b.includes('isolated') || b.includes('hesitant')) &&
+      barriersForMatch.some((b) => b.includes('unfamiliar') || b.includes('alone') || b.includes('isolated') || b.includes('hesitant')) &&
       opp.socialStyle.includes('welcoming_buddy');
 
     if (matchesBarrierResolution) {
       qualifyingBases.push('participation_barrier');
       contextReason += ' + Includes doorway greeter to eliminate entrance anxiety';
+    }
+
+    const natureInterestTokens = ['horse', 'horses', 'animal', 'animals', 'pet', 'pets', 'bird', 'birds', 'nature', 'zoo', 'farm', '马', '动物', '宠物', '鸟', '自然'];
+    const isNatureInterest =
+      interestsForMatch.some((interest) => natureInterestTokens.some((token) => interest.includes(token))) ||
+      (contextPrompt && natureInterestTokens.some((token) => contextPrompt.includes(token)));
+
+    if (
+      isNatureInterest &&
+      opp.purposeType === 'lifestyle_social' &&
+      (oppTopics.includes('gardening') || oppTopics.includes('morning_walk') || oppTopics.includes('tea_gathering')) &&
+      !qualifyingBases.includes('expressed_interest')
+    ) {
+      qualifyingBases.push('expressed_interest');
+      if (!relevanceSource) {
+        relevanceSource = 'Direct match with stated interests in animals, nature, or outdoor life';
+        contextReason = 'A gentle garden setting close to home that fits a love of animals and the outdoors';
+      }
+    }
+
+    if (
+      isNatureInterest &&
+      opp.purposeType === 'discovery_experience' &&
+      (oppTopics.includes('nature_discovery') || oppTopics.includes('soundscape') || oppTopics.includes('heritage_trees') || opp.id === 'opp-botanic-soundwalk') &&
+      !qualifyingBases.includes('discovery_need')
+    ) {
+      qualifyingBases.push('discovery_need');
+      if (!relevanceSource) {
+        relevanceSource = 'Nature discovery outing matching a love of animals and the outdoors';
+        contextReason = 'A calm guided walk among trees, birdsong, and open green space';
+      }
     }
 
     // Eligibility check: Candidate must possess at least one qualifying relevance basis
@@ -377,6 +437,13 @@ export function runRecommendationPipeline(
       ) {
         fitScore += 20;
       }
+    }
+
+    if (
+      isNatureInterest &&
+      (opp.topics.includes('nature_discovery') || opp.id === 'opp-botanic-soundwalk' || opp.topics.includes('gardening'))
+    ) {
+      fitScore += opp.id === 'opp-botanic-soundwalk' ? 28 : 8;
     }
 
     // Barrier resolution fit (e.g. Doorway greeter for alone/unfamiliar barrier)

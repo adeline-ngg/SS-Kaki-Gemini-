@@ -636,6 +636,13 @@ export const DEFAULT_LIFE_PARTICIPATION_GRAPH: LifeParticipationGraph = {
   currentSeries: [],
   recentOpportunityHistory: [],
   dislikes: ['Vigorous jumping / running', 'Aggressive commercial sales'],
+  sessionInsights: {
+    interests: [],
+    participationBarriers: [],
+    accessibilityPreferences: [],
+    purposeDrivers: [],
+    contextualSignals: [],
+  },
 };
 
 /**
@@ -669,5 +676,211 @@ export function createFreshGraph(override?: Partial<LifeParticipationGraph>): Li
     currentSeries: override.currentSeries ? JSON.parse(JSON.stringify(override.currentSeries)) : JSON.parse(JSON.stringify(base.currentSeries)),
     recentOpportunityHistory: override.recentOpportunityHistory ? JSON.parse(JSON.stringify(override.recentOpportunityHistory)) : JSON.parse(JSON.stringify(base.recentOpportunityHistory)),
     dislikes: override.dislikes ? [...override.dislikes] : [...base.dislikes],
+    sessionInsights: override.sessionInsights
+      ? {
+          interests: [...(override.sessionInsights.interests || [])],
+          participationBarriers: [...(override.sessionInsights.participationBarriers || [])],
+          accessibilityPreferences: [...(override.sessionInsights.accessibilityPreferences || [])],
+          purposeDrivers: [...(override.sessionInsights.purposeDrivers || [])],
+          contextualSignals: [...(override.sessionInsights.contextualSignals || [])],
+        }
+      : {
+          interests: [],
+          participationBarriers: [],
+          accessibilityPreferences: [],
+          purposeDrivers: [],
+          contextualSignals: [],
+        },
   };
+}
+
+function uniqueTexts(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = (value || '').trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+export function emptySessionInsights(): NonNullable<LifeParticipationGraph['sessionInsights']> {
+  return {
+    interests: [],
+    participationBarriers: [],
+    accessibilityPreferences: [],
+    purposeDrivers: [],
+    contextualSignals: [],
+  };
+}
+
+/** Merge newly heard Talk facts into both the durable graph and this-session insight lock. */
+export function mergeConversationInsights(
+  graph: LifeParticipationGraph,
+  delta: {
+    interests?: string[];
+    participationBarriers?: string[];
+    accessibilityPreferences?: string[];
+    purposeDrivers?: string[];
+    contextualSignals?: string[];
+  }
+): LifeParticipationGraph {
+  const session = graph.sessionInsights || emptySessionInsights();
+  return {
+    ...graph,
+    interests: uniqueTexts([...graph.interests, ...(delta.interests || [])]),
+    participationBarriers: uniqueTexts([...graph.participationBarriers, ...(delta.participationBarriers || [])]),
+    accessibilityPreferences: uniqueTexts([
+      ...graph.accessibilityPreferences,
+      ...(delta.accessibilityPreferences || []),
+    ]),
+    purposeDrivers: uniqueTexts([...graph.purposeDrivers, ...(delta.purposeDrivers || [])]),
+    contextualSignals: uniqueTexts([...graph.contextualSignals, ...(delta.contextualSignals || [])]),
+    sessionInsights: {
+      interests: uniqueTexts([...session.interests, ...(delta.interests || [])]),
+      participationBarriers: uniqueTexts([...session.participationBarriers, ...(delta.participationBarriers || [])]),
+      accessibilityPreferences: uniqueTexts([
+        ...session.accessibilityPreferences,
+        ...(delta.accessibilityPreferences || []),
+      ]),
+      purposeDrivers: uniqueTexts([...session.purposeDrivers, ...(delta.purposeDrivers || [])]),
+      contextualSignals: uniqueTexts([...session.contextualSignals, ...(delta.contextualSignals || [])]),
+    },
+  };
+}
+
+const INTEREST_CUES: Array<{ label: string; keys: string[] }> = [
+  { label: 'horses', keys: ['horse', 'horses', 'pony', 'equine', 'stable', '骑马', '马儿', '爱马', '养马', '马匹'] },
+  { label: 'animals', keys: ['animal', 'animals', 'pet', 'pets', 'zoo', 'bird', 'birds', 'dog', 'cat', '动物', '宠物', '小鸟', '鸟类'] },
+  { label: 'dancing', keys: ['dance', 'dancing', 'waltz', 'ballroom', 'cha-cha', '跳舞', '华尔兹', '国标', '茶舞'] },
+  { label: 'gardening', keys: ['garden', 'gardening', 'plants', 'flowers', '花园', '种菜', '园艺'] },
+  { label: 'singing', keys: ['sing', 'singing', 'karaoke', 'old songs', '唱歌', '老歌', '卡拉'] },
+  { label: 'mentoring', keys: ['mentor', 'mentoring', 'youth', '指导', '年轻人', '后辈'] },
+];
+
+/** Pull structured interest labels out of Talk text or insight-card copy. */
+export function inferConversationInterests(text: string): string[] {
+  const haystack = (text || '').toLowerCase();
+  if (!haystack.trim()) return [];
+  return INTEREST_CUES.filter((cue) => cue.keys.some((key) => haystack.includes(key.toLowerCase()))).map(
+    (cue) => cue.label
+  );
+}
+
+export function reviewContextPrompt(
+  transcript: string,
+  items?: UnderstandingItem[],
+  extraInterests?: string[]
+): string {
+  return [transcript, ...(items || []).map((item) => `${item.en} ${item.zh}`), ...(extraInterests || [])]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
+ * Rank from what Understanding actually showed, even if Gemini never
+ * wrote structured sessionInsights (cards can come from spoken fallback).
+ */
+export function lockGraphFromReview(
+  graph: LifeParticipationGraph,
+  transcript: string,
+  items: UnderstandingItem[] = []
+): LifeParticipationGraph {
+  const baselineInterests = new Set(
+    (DEFAULT_LIFE_PARTICIPATION_GRAPH.interests || []).map((item) => item.toLowerCase())
+  );
+  const interestTexts = items
+    .filter((item) => item.category === 'interest' || item.category === 'purpose' || !item.category)
+    .map((item) => item.en)
+    .filter((text) => text && !baselineInterests.has(text.toLowerCase()));
+  const barrierTexts = items.filter((item) => item.category === 'barrier').map((item) => item.en);
+  const inferred = inferConversationInterests(`${transcript} ${interestTexts.join(' ')}`);
+  return mergeConversationInsights(graph, {
+    interests: [...interestTexts, ...inferred],
+    participationBarriers: barrierTexts,
+  });
+}
+
+/**
+ * Builds Understanding screen cards from the live Life Participation Graph.
+ * Conversation-session insights are locked first so canned demo interests
+ * (dancing, tea, gardens) cannot hide what the person just said.
+ */
+export function understandingItemsFromGraph(
+  graph: LifeParticipationGraph,
+  spokenFallback?: string
+): UnderstandingItem[] {
+  const items: UnderstandingItem[] = [];
+
+  const add = (
+    en: string,
+    zh: string,
+    iconName: UnderstandingItem['iconName'],
+    category: UnderstandingItem['category']
+  ) => {
+    if (!en || items.length >= 4) return;
+    if (items.some((item) => item.en.toLowerCase() === en.toLowerCase())) return;
+    items.push({
+      id: `u-graph-${items.length + 1}`,
+      en,
+      zh: zh || en,
+      detailEn: '',
+      detailZh: '',
+      iconName,
+      confirmed: true,
+      category,
+    });
+  };
+
+  const session = graph.sessionInsights || emptySessionInsights();
+  const spoken = (spokenFallback || '').replace(/[“”"]/g, '').trim();
+
+  for (const interest of session.interests) {
+    add(interest, interest, 'music', 'interest');
+  }
+  for (const barrier of session.participationBarriers) {
+    add(barrier, barrier, 'users', 'barrier');
+  }
+  for (const access of session.accessibilityPreferences) {
+    add(access, access, 'heart-handshake', 'barrier');
+  }
+  for (const purpose of session.purposeDrivers) {
+    add(purpose, purpose, 'award', 'purpose');
+  }
+  for (const signal of session.contextualSignals) {
+    add(signal, signal, 'sparkles', 'life_stage');
+  }
+
+  if (items.length === 0 && spoken) {
+    const snippet = spoken.length > 140 ? `${spoken.slice(0, 137)}…` : spoken;
+    add(snippet, snippet, 'music', 'interest');
+  }
+
+  const hasConversationLock = items.length > 0;
+  if (hasConversationLock) {
+    return items.slice(0, 4);
+  }
+
+  for (const interest of graph.interests || []) {
+    add(interest, interest, 'music', 'interest');
+  }
+  for (const barrier of graph.participationBarriers || []) {
+    add(barrier, barrier, 'users', 'barrier');
+  }
+  for (const access of graph.accessibilityPreferences || []) {
+    add(access, access, 'heart-handshake', 'barrier');
+  }
+  if (graph.profile?.lifeStage) {
+    const stage = graph.profile.lifeStage.replace(/_/g, ' ');
+    add(`Life stage: ${stage}`, `人生阶段：${stage}`, 'book-open', 'life_stage');
+  }
+  for (const signal of graph.contextualSignals || []) {
+    add(signal, signal, 'sparkles', 'life_stage');
+  }
+
+  return items.slice(0, 4);
 }

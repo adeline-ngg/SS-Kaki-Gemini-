@@ -31,10 +31,11 @@ import {
   INITIAL_MY_WORLD_STATS,
   MY_WORLD_CATEGORIES,
 } from './data/mockData';
-import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG, createFreshGraph } from './data/opportunities';
+import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG, createFreshGraph, understandingItemsFromGraph, lockGraphFromReview, reviewContextPrompt } from './data/opportunities';
 import { runRecommendationPipeline } from './services/recommendationEngine';
 import { TestScenario } from './data/scenarios';
 import { LiveVoiceService } from './services/liveVoiceService';
+import { resolveLiveNavigateTarget, shouldConsumeLiveSessionEvent, shouldApplyLiveGraphUpdate } from './services/voiceHandoff';
 
 export default function App() {
   // Navigation & Screen State
@@ -55,9 +56,9 @@ export default function App() {
   // Core Life Participation Graph
   const [lifeGraph, setLifeGraph] = useState<LifeParticipationGraph>(DEFAULT_LIFE_PARTICIPATION_GRAPH);
 
-  // Conversational utterances
-  const [userUtteranceZh, setUserUtteranceZh] = useState('“以前我跟我老公很喜欢去跳舞。Ballroom 那种。现在比较少去了。”');
-  const [userUtteranceEn, setUserUtteranceEn] = useState('"My late husband and I used to love ballroom dancing. We rarely go these days."');
+  // Conversational utterances — empty until speech or typed input is actually received
+  const [userUtteranceZh, setUserUtteranceZh] = useState('');
+  const [userUtteranceEn, setUserUtteranceEn] = useState('');
   const [kakiResponseZh, setKakiResponseZh] = useState('“原来你还是很喜欢跳舞。现在如果有人陪你一起去，你会比较愿意吗？”');
   const [kakiResponseEn, setKakiResponseEn] = useState('"So dancing is still something you love. If someone could accompany you, would you feel more open to going?"');
 
@@ -78,6 +79,36 @@ export default function App() {
 
   // Reference to LiveVoiceService instance
   const liveVoiceServiceRef = useRef<LiveVoiceService | null>(null);
+  const currentScreenRef = useRef<ScreenType>('home');
+  const lifeGraphRef = useRef<LifeParticipationGraph>(DEFAULT_LIFE_PARTICIPATION_GRAPH);
+  const liveHandoffLockedRef = useRef(false);
+  const conversationTranscriptRef = useRef('');
+
+  const stopLiveVoice = useCallback(() => {
+    liveVoiceServiceRef.current?.stopRecording();
+    liveVoiceServiceRef.current?.stopAudioPlayback();
+    liveVoiceServiceRef.current?.disconnect();
+  }, []);
+
+  const beginVoiceReview = useCallback(() => {
+    liveHandoffLockedRef.current = true;
+    stopLiveVoice();
+  }, [stopLiveVoice]);
+
+  useEffect(() => {
+    currentScreenRef.current = currentScreen;
+  }, [currentScreen]);
+
+  useEffect(() => {
+    lifeGraphRef.current = lifeGraph;
+  }, [lifeGraph]);
+
+  // Mic and Live tools belong on Talk only. Later screens are tap-driven.
+  useEffect(() => {
+    if (currentScreen === 'conversation') return;
+    liveHandoffLockedRef.current = true;
+    stopLiveVoice();
+  }, [currentScreen, stopLiveVoice]);
 
   // Helper to sync recommendations from the pipeline
   const syncPipeline = useCallback((graph: LifeParticipationGraph, context?: string) => {
@@ -88,21 +119,43 @@ export default function App() {
     }
   }, []);
 
+  const rankFromLockedReview = useCallback(
+    (graph: LifeParticipationGraph, items: UnderstandingItem[]) => {
+      const locked = lockGraphFromReview(graph, conversationTranscriptRef.current, items);
+      setLifeGraph(locked);
+      syncPipeline(
+        locked,
+        reviewContextPrompt(conversationTranscriptRef.current, items, locked.sessionInsights?.interests)
+      );
+      return locked;
+    },
+    [syncPipeline]
+  );
+
   // Initialize LiveVoiceService once
   useEffect(() => {
     const service = new LiveVoiceService({
       onStateChange: (state) => {
+        if (liveHandoffLockedRef.current) return;
         setConversationState(state);
       },
       onUserTranscript: (text) => {
-        setUserUtteranceZh(`“${text}”`);
-        setUserUtteranceEn(`"${text}"`);
+        if (liveHandoffLockedRef.current) return;
+        const trimmed = (text || '').trim();
+        if (!trimmed) {
+          return;
+        }
+        conversationTranscriptRef.current = `${conversationTranscriptRef.current} ${trimmed}`.trim();
+        setUserUtteranceZh(`“${trimmed}”`);
+        setUserUtteranceEn(`"${trimmed}"`);
       },
       onModelTranscript: (text) => {
+        if (liveHandoffLockedRef.current) return;
         setKakiResponseZh(`“${text}”`);
         setKakiResponseEn(`"${text}"`);
       },
       onVolumeChange: (vol) => {
+        if (liveHandoffLockedRef.current) return;
         setLiveVolume(vol);
       },
       onConnectionStatusChange: (status, msg) => {
@@ -113,33 +166,38 @@ export default function App() {
           setLiveErrorMessage(null);
         }
       },
-      onGraphUpdated: (updatedGraph, recs) => {
-        setLifeGraph(updatedGraph);
-        if (recs && recs.length > 0) {
-          setRecommendationsList(recs);
-          setCurrentRecIndex(0);
-        } else {
-          syncPipeline(updatedGraph);
+      onGraphUpdated: (updatedGraph) => {
+        if (!shouldApplyLiveGraphUpdate(currentScreenRef.current)) {
+          return;
         }
+        const items = understandingItemsFromGraph(updatedGraph, conversationTranscriptRef.current);
+        setUnderstandingItems(items);
+        rankFromLockedReview(updatedGraph, items);
       },
       onRecommendationsRequested: (recs) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         if (recs && recs.length > 0) {
           setRecommendationsList(recs);
           setCurrentRecIndex(0);
         }
       },
-      onOpportunityAccepted: (opp, updatedGraph) => {
-        setConfirmedActivity(opp);
-        if (updatedGraph) setLifeGraph(updatedGraph);
-        setMyWorldStats((prev) => ({
-          ...prev,
-          outingsThisMonth: prev.outingsThisMonth + 1,
-          peopleConnected: prev.peopleConnected + 1,
-          newExperiences: prev.newExperiences + 1,
-        }));
-        setCurrentScreen('my-world');
+      onOpportunityAccepted: (opp, updatedGraph, recs) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
+        const graphForCards = updatedGraph || lifeGraphRef.current;
+        const items = understandingItemsFromGraph(graphForCards, conversationTranscriptRef.current);
+        setUnderstandingItems(items);
+        rankFromLockedReview(graphForCards, items);
+        beginVoiceReview();
+        setCurrentScreen('understanding');
       },
       onOpportunityRejected: (reason, barrier, updatedGraph, recs) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         if (updatedGraph) setLifeGraph(updatedGraph);
         if (recs && recs.length > 0) {
           setRecommendationsList(recs);
@@ -149,15 +207,35 @@ export default function App() {
         }
       },
       onExplainRequested: (opp) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         setIsWhyThisOpen(true);
       },
       onMemoryConsentRequested: (prompt) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         setMemoryConsentPrompt(prompt);
       },
       onNavigateScreen: (screen) => {
-        if (['home', 'conversation', 'understanding', 'recommendation', 'my-world'].includes(screen)) {
-          setCurrentScreen(screen as ScreenType);
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
         }
+        const target = resolveLiveNavigateTarget(screen, currentScreenRef.current);
+        if (!target) return;
+        if (target === 'understanding') {
+          const items = understandingItemsFromGraph(
+            lifeGraphRef.current,
+            conversationTranscriptRef.current
+          );
+          setUnderstandingItems(items);
+          rankFromLockedReview(lifeGraphRef.current, items);
+        }
+        if (target !== 'conversation') {
+          beginVoiceReview();
+        }
+        setCurrentScreen(target);
       },
       onError: (err) => {
         setLiveErrorMessage(err);
@@ -173,7 +251,7 @@ export default function App() {
     return () => {
       service.disconnect();
     };
-  }, [syncPipeline]);
+  }, [syncPipeline, stopLiveVoice, beginVoiceReview, rankFromLockedReview]);
 
   // Keep live voice service updated with graph and current recommendation
   const currentRecommendation = recommendationsList[currentRecIndex] || RECOMMENDATIONS[0];
@@ -181,23 +259,30 @@ export default function App() {
   useEffect(() => {
     if (liveVoiceServiceRef.current) {
       liveVoiceServiceRef.current.setGraph(lifeGraph);
-      if (currentRecommendation) {
+      if (currentScreen === 'recommendation' && currentRecommendation) {
         liveVoiceServiceRef.current.setActiveOpportunityId(currentRecommendation.id);
       }
     }
-  }, [lifeGraph, currentRecommendation]);
+  }, [lifeGraph, currentRecommendation, currentScreen]);
 
   // Process Utterance via REST Chat API (Fallback or touch input)
   const handleProcessUtterance = async (utterance: string) => {
     setIsLoadingBackend(true);
     setConversationState('thinking');
+    setUserUtteranceZh(`“${utterance}”`);
+    setUserUtteranceEn(`"${utterance}"`);
+    conversationTranscriptRef.current = `${conversationTranscriptRef.current} ${utterance}`.trim();
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 25000);
 
     try {
       const res = await fetch('/api/kaki/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
-          userUtterance: utterance,
+          userUtterance: conversationTranscriptRef.current || utterance,
           currentGraph: lifeGraph,
           languageMode,
         }),
@@ -219,10 +304,16 @@ export default function App() {
           setRecommendationsList(data.topRecommendations);
           setCurrentRecIndex(0);
         }
+      } else {
+        setKakiResponseEn('"Give me a moment — the connection was slow just now. Could you say that again?"');
+        setKakiResponseZh('"等我一下，刚才连线有点慢。可以再说一次吗？"');
       }
     } catch (e) {
       console.warn('Backend API unavailable, using local pipeline synthesis:', e);
+      setKakiResponseEn('"Give me a moment — the connection was slow just now. Could you say that again?"');
+      setKakiResponseZh('"等我一下，刚才连线有点慢。可以再说一次吗？"');
     } finally {
+      window.clearTimeout(timeoutId);
       setIsLoadingBackend(false);
       setConversationState('speaking');
       // Play audio response via TTS fallback only if audio is enabled
@@ -290,12 +381,13 @@ export default function App() {
     setCurrentRecIndex(0);
     setConfirmedActivity(null);
     setMyWorldStats(INITIAL_MY_WORLD_STATS);
-    setUserUtteranceZh('“以前我跟我老公很喜欢去跳舞。Ballroom 那种。现在比较少去了。”');
-    setUserUtteranceEn('"My husband and I used to really enjoy ballroom dancing. We don\'t go much anymore."');
+    setUserUtteranceZh('');
+    setUserUtteranceEn('');
     setKakiResponseZh('“原来你还是很喜欢跳舞。大巴窑联络所有温和的茶舞与音乐聚会，环境很轻松，你想不想去看看？”');
     setKakiResponseEn('"So dancing is still something you love. Toa Payoh CC has a relaxed tea dance and evergreen music gathering. Would you like to check it out?"');
     setMemoryConsentPrompt(null);
     setLiveErrorMessage(null);
+    conversationTranscriptRef.current = '';
     if (liveVoiceServiceRef.current) {
       liveVoiceServiceRef.current.resetConversation();
       liveVoiceServiceRef.current.setGraph(cleanBaseline);
@@ -305,9 +397,25 @@ export default function App() {
 
   // Start Voice Session
   const handleStartVoice = async () => {
+    liveHandoffLockedRef.current = false;
+    conversationTranscriptRef.current = '';
+    setLifeGraph((prev) => ({
+      ...prev,
+      sessionInsights: {
+        interests: [],
+        participationBarriers: [],
+        accessibilityPreferences: [],
+        purposeDrivers: [],
+        contextualSignals: [],
+      },
+    }));
     setCurrentScreen('conversation');
     setConversationState('listening');
     setLiveErrorMessage(null);
+    setUserUtteranceZh('');
+    setUserUtteranceEn('');
+    liveVoiceServiceRef.current?.resetConversation();
+    liveVoiceServiceRef.current?.setActiveOpportunityId(null);
 
     if (liveVoiceMode === 'live' && liveVoiceServiceRef.current) {
       const success = await liveVoiceServiceRef.current.startRecording();
@@ -318,24 +426,20 @@ export default function App() {
   };
 
   const handleGoHome = () => {
-    if (liveVoiceServiceRef.current) {
-      liveVoiceServiceRef.current.stopRecording();
-      liveVoiceServiceRef.current.stopAudioPlayback();
-    }
+    stopLiveVoice();
     setCurrentScreen('home');
   };
 
   const handleProceedToUnderstanding = () => {
-    if (liveVoiceServiceRef.current) {
-      liveVoiceServiceRef.current.stopAudioPlayback();
-    }
+    stopLiveVoice();
+    const items = understandingItemsFromGraph(lifeGraph, conversationTranscriptRef.current);
+    setUnderstandingItems(items);
+    rankFromLockedReview(lifeGraph, items);
     setCurrentScreen('understanding');
   };
 
   const handleDirectToRetirementRecommendation = () => {
-    if (liveVoiceServiceRef.current) {
-      liveVoiceServiceRef.current.stopAudioPlayback();
-    }
+    stopLiveVoice();
     // Explicitly select the retirement planning workshop
     const cpfIndex = recommendationsList.findIndex(
       (r) => r.id === 'opp-cpf-foundations' || r.purposeType === 'life_stage_learning'
@@ -353,6 +457,8 @@ export default function App() {
   };
 
   const handleConfirmUnderstanding = () => {
+    stopLiveVoice();
+    rankFromLockedReview(lifeGraph, understandingItems);
     setCurrentScreen('recommendation');
   };
 
@@ -372,6 +478,7 @@ export default function App() {
       peopleConnected: prev.peopleConnected + 1,
       newExperiences: prev.newExperiences + 1,
     }));
+    stopLiveVoice();
     setCurrentScreen('my-world');
   };
 
@@ -435,6 +542,9 @@ export default function App() {
   };
 
   const handleJumpToScreen = (screen: ScreenType, convState?: ConversationState) => {
+    if (screen !== 'conversation') {
+      stopLiveVoice();
+    }
     if (convState) {
       setConversationState(convState);
     }
@@ -462,6 +572,7 @@ export default function App() {
           onLogoClick={handleGoHome}
           isVoiceAudioEnabled={isVoiceAudioEnabled}
           onToggleVoiceAudio={() => setIsVoiceAudioEnabled((prev) => !prev)}
+          onApplyScenario={handleApplyScenario}
         />
 
         {/* Main App Screen Viewport */}
@@ -496,7 +607,6 @@ export default function App() {
               kakiResponseZh={kakiResponseZh}
               kakiResponseEn={kakiResponseEn}
               onProcessUtterance={handleProcessUtterance}
-              onApplyScenario={handleApplyScenario}
               onInterrupt={handleInterrupt}
               onTogglePause={handleTogglePause}
               onHearAgain={handleHearAgain}
@@ -562,7 +672,14 @@ export default function App() {
         {/* Persistent Minimal Bottom Navigation (Docked) */}
         <BottomNav
           currentScreen={currentScreen}
-          onNavigate={(screen) => setCurrentScreen(screen)}
+          onNavigate={(screen) => {
+            if (screen === 'conversation') {
+              handleStartVoice();
+              return;
+            }
+            stopLiveVoice();
+            setCurrentScreen(screen);
+          }}
           isLargeText={textScale === 'large'}
         />
 

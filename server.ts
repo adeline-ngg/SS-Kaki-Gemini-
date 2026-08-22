@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
@@ -9,11 +10,14 @@ import { runRecommendationPipeline, getPurposeFraming } from './src/services/rec
 import { TEST_SCENARIOS } from './src/data/scenarios';
 import { LifeParticipationGraph, Opportunity } from './src/types';
 
+export const GEMINI_CHAT_MODEL = 'gemini-3.7-flash';
+export const GEMINI_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
+
 // Lazy Gemini client initialization
 let genAIClient: GoogleGenAI | null = null;
 
 function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     return null;
   }
@@ -246,7 +250,7 @@ async function startServer() {
     } else {
       try {
         liveSession = await ai.live.connect({
-          model: 'gemini-3.1-flash-live-preview',
+          model: GEMINI_LIVE_MODEL,
           config: {
             responseModalities: [Modality.AUDIO],
             outputAudioTranscription: {},
@@ -606,7 +610,9 @@ async function startServer() {
     res.json({
       status: 'ok',
       time: new Date().toISOString(),
-      geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+      geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+      chatModel: GEMINI_CHAT_MODEL,
+      liveModel: GEMINI_LIVE_MODEL,
     });
   });
 
@@ -747,7 +753,7 @@ Return strictly JSON matching this structure:
 `;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: GEMINI_CHAT_MODEL,
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_PROMPT,
@@ -818,7 +824,13 @@ Return strictly JSON matching this structure:
   }
 
   server.listen(PORT, '0.0.0.0', () => {
+    const geminiReady = Boolean(process.env.GEMINI_API_KEY?.trim());
     console.log(`Kaki Server + Gemini Live WebSocket running on http://localhost:${PORT}`);
+    console.log(
+      geminiReady
+        ? `Gemini configured: yes (${GEMINI_CHAT_MODEL} chat, ${GEMINI_LIVE_MODEL} live)`
+        : 'Gemini configured: no — set GEMINI_API_KEY in .env or the process environment'
+    );
   });
 }
 

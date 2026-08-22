@@ -284,7 +284,8 @@ export class LiveVoiceService {
 
       switch (msg.type) {
         case 'status':
-          if (msg.status === 'live_unavailable') {
+          if (msg.status === 'live_unavailable' || msg.status === 'error') {
+            this.connectionStatus = 'error';
             this.callbacks.onConnectionStatusChange?.('error', msg.message);
           } else if (msg.status === 'connected') {
             this.connectionStatus = 'connected';
@@ -317,7 +318,10 @@ export class LiveVoiceService {
 
         case 'turn_complete':
           console.log('[LiveVoiceService] Turn complete');
-          // Reset transcript buffer for next turn if needed
+          // Keep the finished turn visible in React state, but start the next
+          // transcript accumulation from a clean buffer.
+          this.currentUserText = '';
+          this.currentModelText = '';
           break;
 
         case 'graph_updated':

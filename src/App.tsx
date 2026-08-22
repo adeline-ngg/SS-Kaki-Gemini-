@@ -462,6 +462,7 @@ export default function App() {
           onLogoClick={handleGoHome}
           isVoiceAudioEnabled={isVoiceAudioEnabled}
           onToggleVoiceAudio={() => setIsVoiceAudioEnabled((prev) => !prev)}
+          onApplyScenario={handleApplyScenario}
         />
 
         {/* Main App Screen Viewport */}
@@ -496,7 +497,6 @@ export default function App() {
               kakiResponseZh={kakiResponseZh}
               kakiResponseEn={kakiResponseEn}
               onProcessUtterance={handleProcessUtterance}
-              onApplyScenario={handleApplyScenario}
               onInterrupt={handleInterrupt}
               onTogglePause={handleTogglePause}
               onHearAgain={handleHearAgain}
@@ -562,7 +562,13 @@ export default function App() {
         {/* Persistent Minimal Bottom Navigation (Docked) */}
         <BottomNav
           currentScreen={currentScreen}
-          onNavigate={(screen) => setCurrentScreen(screen)}
+          onNavigate={(screen) => {
+            if (screen === 'conversation') {
+              handleStartVoice();
+              return;
+            }
+            setCurrentScreen(screen);
+          }}
           isLargeText={textScale === 'large'}
         />
 

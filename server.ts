@@ -108,8 +108,9 @@ VOICE & TONE GUIDELINES:
 8. TOOL & ACTION CALLING:
    - When the user shares interests, barriers, or life stage signals, call "update_life_participation_graph".
    - When enough context exists or the user is open to seeing activities, call "request_opportunity_recommendation".
-   - When the user is ready to review what you understood, or says "这个可以" / "Sounds good" / "Okay lah" during conversation, call "accept_current_opportunity" to show the understanding check, then the event card. Do NOT skip to a completed/saved state.
-   - Only call "navigate_to_screen" with "understanding" or "recommendation" after a conversation. Never navigate to "my-world" from conversation; that screen is only after the user confirms the event card.
+   - When the user is ready to review what you understood, or says "这个可以" / "Sounds good" / "Okay lah" / "yes" during conversation, call "accept_current_opportunity" once. That only opens the understanding check. Do NOT call navigate_to_screen afterward, and NEVER mark the activity completed.
+   - Never call "navigate_to_screen" with "recommendation" or "my-world". Event details and My World are tap-only after the person confirms understanding, then confirms the event card.
+   - Only call "navigate_to_screen" with "understanding" or "home".
    - When the user says "不要这个" / "太远了", call "reject_current_opportunity" (and record distance/transport barrier).
    - When the user asks "为什么推荐这个？", call "explain_current_recommendation".
    - For meaningful long-term preferences, call "request_memory_consent" (e.g. "Would you like me to remember that?").
@@ -170,7 +171,7 @@ const LIVE_FUNCTION_DECLARATIONS = [
   },
   {
     name: 'accept_current_opportunity',
-    description: 'Call when user expresses positive confirmation or acceptance of the current opportunity (e.g. "这个可以", "Sounds good", "Okay lah", "我想参加").',
+    description: 'Call when the user is ready to review what you understood (e.g. "这个可以", "Sounds good", "Okay lah", "yes"). This opens the understanding check only. It does NOT save or complete an activity.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -239,13 +240,13 @@ const LIVE_FUNCTION_DECLARATIONS = [
   },
   {
     name: 'navigate_to_screen',
-    description: 'Navigate the application to a specific screen.',
+    description: 'Leave Talk to show the understanding check, or return home. Never open event details or My World; those screens are tap-only.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         screen: {
           type: Type.STRING,
-          description: 'Screen to navigate to: "home" | "conversation" | "understanding" | "recommendation" | "my-world"',
+          description: 'Use "understanding" after the user is ready to review, or "home". Do not use "recommendation" or "my-world".',
         },
       },
       required: ['screen'],
@@ -274,6 +275,13 @@ async function startServer() {
     let currentOpportunityId: string | null = null;
     let liveSession: any = null;
     let isSessionReady = false;
+    let clientReviewStarted = false;
+
+    const sendClient = (payload: Record<string, unknown>) => {
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify(payload));
+      }
+    };
 
     // Helper to run pipeline and return recommendations
     const getRecommendationsForGraph = (graph: LifeParticipationGraph, context?: string) => {
@@ -384,6 +392,20 @@ async function startServer() {
 
                     let result: any = { success: true };
 
+                    if (clientReviewStarted) {
+                      result = {
+                        success: true,
+                        ignored: true,
+                        reason: 'The understanding check is on screen. Stop using leftover speech. Do not navigate or update the graph.',
+                      };
+                      responses.push({
+                        name,
+                        id,
+                        response: { output: result },
+                      });
+                      continue;
+                    }
+
                     if (name === 'update_life_participation_graph') {
                       const newInterests: string[] = Array.isArray(args.interests) ? args.interests : [];
                       const newBarriers: string[] = Array.isArray(args.participationBarriers) ? args.participationBarriers : [];
@@ -460,18 +482,17 @@ async function startServer() {
                         currentOpportunityId = matched.id;
                       }
 
-                      clientWs.send(
-                        JSON.stringify({
-                          type: 'opportunity_accepted',
-                          opportunity: matched,
-                          updatedGraph: currentGraph,
-                        })
-                      );
+                      clientReviewStarted = true;
+                      sendClient({
+                        type: 'opportunity_accepted',
+                        opportunity: matched,
+                        updatedGraph: currentGraph,
+                      });
 
                       result = {
                         success: true,
                         acceptedActivity: matched.titleEn,
-                        message: 'Show the understanding check, then the event details. Do not mark it completed yet.',
+                        message: 'Show the understanding check only. Do not navigate to event details or My World, and do not mark it completed.',
                         nextScreen: 'understanding',
                       };
                     } else if (name === 'reject_current_opportunity') {
@@ -530,14 +551,24 @@ async function startServer() {
                         promptedUser: true,
                       };
                     } else if (name === 'navigate_to_screen') {
-                      clientWs.send(
-                        JSON.stringify({
-                          type: 'navigate_screen',
-                          screen: args.screen,
-                        })
-                      );
+                      const requested = typeof args.screen === 'string' ? args.screen : '';
+                      const navigatedTo =
+                        requested === 'home' ? 'home' : requested === 'conversation' ? 'conversation' : 'understanding';
+                      clientReviewStarted = navigatedTo !== 'conversation';
+                      sendClient({
+                        type: 'navigate_screen',
+                        screen: navigatedTo,
+                      });
 
-                      result = { success: true, navigatedTo: args.screen };
+                      result = {
+                        success: true,
+                        navigatedTo,
+                        remappedFrom: requested !== navigatedTo ? requested : undefined,
+                        message:
+                          navigatedTo === 'understanding'
+                            ? 'Understanding check is showing. Do not open event details or My World from voice.'
+                            : undefined,
+                      };
                     }
 
                     responses.push({
@@ -594,6 +625,9 @@ async function startServer() {
           }
         } else if (msg.type === 'audio') {
           // 16kHz PCM audio chunk from microphone
+          if (clientReviewStarted) {
+            return;
+          }
           if (liveSession && isSessionReady) {
             await liveSession.sendRealtimeInput({
               audio: {
@@ -603,6 +637,9 @@ async function startServer() {
             });
           }
         } else if (msg.type === 'text') {
+          if (clientReviewStarted) {
+            return;
+          }
           // Spoken text transcription or fallback text message
           if (liveSession && isSessionReady) {
             await liveSession.sendRealtimeInput({
@@ -623,12 +660,15 @@ async function startServer() {
 
     clientWs.on('close', () => {
       console.log('[Gemini Live WS] Client disconnected');
+      isSessionReady = false;
+      clientReviewStarted = true;
       if (liveSession) {
         try {
           liveSession.close();
         } catch (e) {
           // ignore
         }
+        liveSession = null;
       }
     });
 

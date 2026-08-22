@@ -41,6 +41,8 @@ export class LiveVoiceService {
   // User & model live text accumulators
   private currentUserText: string = '';
   private currentModelText: string = '';
+  private sessionOpen = false;
+  private sessionGeneration = 0;
 
   constructor(callbacks: LiveVoiceCallbacks) {
     this.callbacks = callbacks;
@@ -52,14 +54,14 @@ export class LiveVoiceService {
 
   public setGraph(graph: LifeParticipationGraph) {
     this.currentGraph = graph;
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.sessionOpen && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'update_graph', graph }));
     }
   }
 
   public setActiveOpportunityId(opportunityId: string) {
     this.activeOpportunityId = opportunityId;
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.sessionOpen && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'set_active_opportunity', opportunityId }));
     }
   }
@@ -73,9 +75,12 @@ export class LiveVoiceService {
    */
   public async connect(): Promise<boolean> {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      this.sessionOpen = true;
       return true;
     }
 
+    const generation = ++this.sessionGeneration;
+    this.sessionOpen = true;
     this.connectionStatus = 'connecting';
     this.callbacks.onConnectionStatusChange?.('connecting', 'Connecting to Gemini Live…');
 
@@ -87,6 +92,9 @@ export class LiveVoiceService {
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
+          if (generation !== this.sessionGeneration || !this.sessionOpen) {
+            return;
+          }
           console.log('[LiveVoiceService] WebSocket connected');
           this.connectionStatus = 'connected';
           this.callbacks.onConnectionStatusChange?.('connected', 'Live connected');
@@ -105,10 +113,17 @@ export class LiveVoiceService {
         };
 
         this.ws.onmessage = (event) => {
+          if (generation !== this.sessionGeneration || !this.sessionOpen) {
+            return;
+          }
           this.handleIncomingMessage(event.data);
         };
 
         this.ws.onerror = (err) => {
+          if (generation !== this.sessionGeneration) {
+            resolve(false);
+            return;
+          }
           console.warn('[LiveVoiceService] WebSocket error:', err);
           this.connectionStatus = 'error';
           this.callbacks.onConnectionStatusChange?.('error', 'Connection error');
@@ -116,12 +131,17 @@ export class LiveVoiceService {
         };
 
         this.ws.onclose = () => {
+          if (generation !== this.sessionGeneration) {
+            return;
+          }
           console.log('[LiveVoiceService] WebSocket closed');
+          this.sessionOpen = false;
           this.connectionStatus = 'disconnected';
           this.callbacks.onConnectionStatusChange?.('disconnected', 'Disconnected');
         };
       } catch (err: any) {
         console.error('[LiveVoiceService] Failed to create WebSocket:', err);
+        this.sessionOpen = false;
         this.connectionStatus = 'error';
         this.callbacks.onConnectionStatusChange?.('error', err.message || 'Connection failed');
         resolve(false);
@@ -133,10 +153,23 @@ export class LiveVoiceService {
    * Disconnects the WebSocket and cleans up audio resources
    */
   public disconnect() {
+    this.sessionGeneration += 1;
+    this.sessionOpen = false;
+    this.isRecording = false;
+    this.clearListeningReturnTimer();
+
+    if (this.scriptProcessor) {
+      this.scriptProcessor.onaudioprocess = null;
+    }
+
     this.stopRecording();
     this.stopAudioPlayback();
 
     if (this.ws) {
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onopen = null;
+      this.ws.onclose = null;
       try {
         this.ws.close();
       } catch (e) {
@@ -144,6 +177,17 @@ export class LiveVoiceService {
       }
       this.ws = null;
     }
+
+    if (this.inputAudioContext && this.inputAudioContext.state !== 'closed') {
+      void this.inputAudioContext.close();
+    }
+    this.inputAudioContext = null;
+
+    if (this.outputAudioContext && this.outputAudioContext.state !== 'closed') {
+      void this.outputAudioContext.close();
+    }
+    this.outputAudioContext = null;
+
     this.connectionStatus = 'disconnected';
     this.callbacks.onConnectionStatusChange?.('disconnected', 'Disconnected');
   }
@@ -186,6 +230,18 @@ export class LiveVoiceService {
         },
       });
 
+      if (!this.sessionOpen) {
+        this.mediaStream.getTracks().forEach((track) => track.stop());
+        this.mediaStream = null;
+        return false;
+      }
+
+      if (!this.inputAudioContext || this.inputAudioContext.state === 'closed') {
+        this.mediaStream.getTracks().forEach((track) => track.stop());
+        this.mediaStream = null;
+        return false;
+      }
+
       this.mediaSource = this.inputAudioContext.createMediaStreamSource(this.mediaStream);
       // Buffer size 2048 or 4096 provides low latency without overloading the event loop
       this.scriptProcessor = this.inputAudioContext.createScriptProcessor(4096, 1, 1);
@@ -199,7 +255,7 @@ export class LiveVoiceService {
       this.silentGain.connect(this.inputAudioContext.destination);
 
       this.scriptProcessor.onaudioprocess = (e) => {
-        if (!this.isRecording) return;
+        if (!this.sessionOpen || !this.isRecording) return;
 
         const inputChannelData = e.inputBuffer.getChannelData(0);
 
@@ -223,7 +279,7 @@ export class LiveVoiceService {
         const pcm16 = floatTo16BitPCM(resampledData);
         const base64Data = pcmToBase64(pcm16);
 
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        if (this.sessionOpen && this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.ws.send(
             JSON.stringify({
               type: 'audio',
@@ -232,6 +288,11 @@ export class LiveVoiceService {
           );
         }
       };
+
+      if (!this.sessionOpen) {
+        this.stopRecording();
+        return false;
+      }
 
       this.isRecording = true;
       this.callbacks.onStateChange('listening');
@@ -255,6 +316,7 @@ export class LiveVoiceService {
     this.clearListeningReturnTimer();
 
     if (this.scriptProcessor) {
+      this.scriptProcessor.onaudioprocess = null;
       try {
         this.scriptProcessor.disconnect();
       } catch (e) {
@@ -291,7 +353,7 @@ export class LiveVoiceService {
    * Sends text input to Gemini Live
    */
   public sendText(text: string) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.sessionOpen && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'text', text }));
       this.currentUserText = text;
       this.callbacks.onUserTranscript(text);
@@ -303,6 +365,7 @@ export class LiveVoiceService {
    * Handles incoming WebSocket messages from the server
    */
   private handleIncomingMessage(rawMessage: string) {
+    if (!this.sessionOpen) return;
     try {
       const msg = JSON.parse(rawMessage);
 
@@ -429,6 +492,7 @@ export class LiveVoiceService {
    * Decodes base64 24kHz PCM chunk and schedules gapless playback
    */
   private queueAudioChunk(base64Data: string) {
+    if (!this.sessionOpen) return;
     try {
       if (!this.outputAudioContext) {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -463,6 +527,7 @@ export class LiveVoiceService {
       }
 
       source.onended = () => {
+        if (!this.sessionOpen) return;
         const index = this.activeAudioSources.indexOf(source);
         if (index > -1) {
           this.activeAudioSources.splice(index, 1);

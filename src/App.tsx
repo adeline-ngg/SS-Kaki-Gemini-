@@ -35,6 +35,7 @@ import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG, createFreshGraph
 import { runRecommendationPipeline } from './services/recommendationEngine';
 import { TestScenario } from './data/scenarios';
 import { LiveVoiceService } from './services/liveVoiceService';
+import { resolveLiveNavigateTarget, shouldConsumeLiveSessionEvent } from './services/voiceHandoff';
 
 export default function App() {
   // Navigation & Screen State
@@ -80,12 +81,18 @@ export default function App() {
   const liveVoiceServiceRef = useRef<LiveVoiceService | null>(null);
   const currentScreenRef = useRef<ScreenType>('home');
   const lifeGraphRef = useRef<LifeParticipationGraph>(DEFAULT_LIFE_PARTICIPATION_GRAPH);
+  const liveHandoffLockedRef = useRef(false);
 
   const stopLiveVoice = useCallback(() => {
     liveVoiceServiceRef.current?.stopRecording();
     liveVoiceServiceRef.current?.stopAudioPlayback();
     liveVoiceServiceRef.current?.disconnect();
   }, []);
+
+  const beginVoiceReview = useCallback(() => {
+    liveHandoffLockedRef.current = true;
+    stopLiveVoice();
+  }, [stopLiveVoice]);
 
   useEffect(() => {
     currentScreenRef.current = currentScreen;
@@ -94,6 +101,13 @@ export default function App() {
   useEffect(() => {
     lifeGraphRef.current = lifeGraph;
   }, [lifeGraph]);
+
+  // Mic and Live tools belong on Talk only. Later screens are tap-driven.
+  useEffect(() => {
+    if (currentScreen === 'conversation') return;
+    liveHandoffLockedRef.current = true;
+    stopLiveVoice();
+  }, [currentScreen, stopLiveVoice]);
 
   // Helper to sync recommendations from the pipeline
   const syncPipeline = useCallback((graph: LifeParticipationGraph, context?: string) => {
@@ -108,9 +122,11 @@ export default function App() {
   useEffect(() => {
     const service = new LiveVoiceService({
       onStateChange: (state) => {
+        if (liveHandoffLockedRef.current) return;
         setConversationState(state);
       },
       onUserTranscript: (text) => {
+        if (liveHandoffLockedRef.current) return;
         const trimmed = (text || '').trim();
         if (!trimmed) {
           setUserUtteranceZh('');
@@ -121,10 +137,12 @@ export default function App() {
         setUserUtteranceEn(`"${trimmed}"`);
       },
       onModelTranscript: (text) => {
+        if (liveHandoffLockedRef.current) return;
         setKakiResponseZh(`“${text}”`);
         setKakiResponseEn(`"${text}"`);
       },
       onVolumeChange: (vol) => {
+        if (liveHandoffLockedRef.current) return;
         setLiveVolume(vol);
       },
       onConnectionStatusChange: (status, msg) => {
@@ -136,6 +154,9 @@ export default function App() {
         }
       },
       onGraphUpdated: (updatedGraph, recs) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         setLifeGraph(updatedGraph);
         if (recs && recs.length > 0) {
           setRecommendationsList(recs);
@@ -145,13 +166,18 @@ export default function App() {
         }
       },
       onRecommendationsRequested: (recs) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         if (recs && recs.length > 0) {
           setRecommendationsList(recs);
           setCurrentRecIndex(0);
         }
       },
       onOpportunityAccepted: (opp, updatedGraph) => {
-        const screen = currentScreenRef.current;
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         if (opp) {
           setRecommendationsList((prev) => {
             const rest = prev.filter((item) => item.id !== opp.id);
@@ -159,29 +185,17 @@ export default function App() {
           });
           setCurrentRecIndex(0);
         }
-
-        // Spoken "yes" from conversation means review understanding, then the event card.
-        // Only the recommendation Accept action should open My World.
-        if (screen === 'recommendation') {
-          if (updatedGraph) setLifeGraph(updatedGraph);
-          if (opp) setConfirmedActivity(opp);
-          setMyWorldStats((prev) => ({
-            ...prev,
-            outingsThisMonth: prev.outingsThisMonth + 1,
-            peopleConnected: prev.peopleConnected + 1,
-            newExperiences: prev.newExperiences + 1,
-          }));
-          stopLiveVoice();
-          setCurrentScreen('my-world');
-          return;
-        }
+        if (updatedGraph) setLifeGraph(updatedGraph);
 
         const graphForCards = updatedGraph || lifeGraphRef.current;
         setUnderstandingItems(understandingItemsFromGraph(graphForCards));
-        stopLiveVoice();
+        beginVoiceReview();
         setCurrentScreen('understanding');
       },
       onOpportunityRejected: (reason, barrier, updatedGraph, recs) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         if (updatedGraph) setLifeGraph(updatedGraph);
         if (recs && recs.length > 0) {
           setRecommendationsList(recs);
@@ -191,33 +205,30 @@ export default function App() {
         }
       },
       onExplainRequested: (opp) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         setIsWhyThisOpen(true);
       },
       onMemoryConsentRequested: (prompt) => {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
+          return;
+        }
         setMemoryConsentPrompt(prompt);
       },
       onNavigateScreen: (screen) => {
-        if (!['home', 'conversation', 'understanding', 'recommendation', 'my-world'].includes(screen)) {
+        if (!shouldConsumeLiveSessionEvent(currentScreenRef.current, liveHandoffLockedRef.current)) {
           return;
         }
-
-        const current = currentScreenRef.current;
-        if (screen === 'my-world' && current !== 'recommendation') {
+        const target = resolveLiveNavigateTarget(screen, currentScreenRef.current);
+        if (!target) return;
+        if (target === 'understanding') {
           setUnderstandingItems(understandingItemsFromGraph(lifeGraphRef.current));
-          stopLiveVoice();
-          setCurrentScreen('understanding');
-          return;
         }
-        if (screen === 'recommendation' && current === 'conversation') {
-          setUnderstandingItems(understandingItemsFromGraph(lifeGraphRef.current));
-          stopLiveVoice();
-          setCurrentScreen('understanding');
-          return;
+        if (target !== 'conversation') {
+          beginVoiceReview();
         }
-        if (screen !== 'conversation') {
-          stopLiveVoice();
-        }
-        setCurrentScreen(screen as ScreenType);
+        setCurrentScreen(target);
       },
       onError: (err) => {
         setLiveErrorMessage(err);
@@ -233,7 +244,7 @@ export default function App() {
     return () => {
       service.disconnect();
     };
-  }, [syncPipeline, stopLiveVoice]);
+  }, [syncPipeline, stopLiveVoice, beginVoiceReview]);
 
   // Keep live voice service updated with graph and current recommendation
   const currentRecommendation = recommendationsList[currentRecIndex] || RECOMMENDATIONS[0];
@@ -377,6 +388,7 @@ export default function App() {
 
   // Start Voice Session
   const handleStartVoice = async () => {
+    liveHandoffLockedRef.current = false;
     setCurrentScreen('conversation');
     setConversationState('listening');
     setLiveErrorMessage(null);

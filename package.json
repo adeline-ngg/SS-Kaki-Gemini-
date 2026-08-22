@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:deterministic": "tsx scripts/run-deterministic-suite.ts",
+    "test:deterministic": "tsx scripts/run-deterministic-suite.ts && tsx scripts/test-voice-handoff.ts",
     "verify:gemini": "tsx scripts/verify-gemini.ts"
   },
   "dependencies": {

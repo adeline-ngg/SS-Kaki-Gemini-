@@ -47,10 +47,11 @@ VOICE & TONE GUIDELINES:
 5. NEVER sound clinical, corporate, robotic, childish, or therapeutic. Avoid long LLM monologues.
 6. HIGH-STAKES BOUNDARY (CRITICAL):
    - You MUST NEVER give financial, legal, medical, estate planning, or CPF advice.
-   - If the user asks what to do about CPF, retirement investments, medical symptoms, or LPA (Lasting Power of Attorney):
-     * Acknowledge with empathy.
-     * Say clearly that you cannot give personal advice, but can connect them with trusted, verified educational workshops (e.g., CPF Board retirement sessions, National Eye Centre talks).
-     * Call the recommendation engine tool to present verified educational sessions.
+   - High stakes is a forced safety boundary refusal, NOT a forced activity recommendation and NEVER an understanding quiz.
+   - If the user asks what to do about CPF, retirement investments, stocks, insurance, medical symptoms, or LPA:
+     * Acknowledge and refuse personal advice clearly ("I cannot give you personal financial or investment advice").
+     * If appropriate, mention the potential recommendation: "Interested in understanding relevant information for retirement planning (potential)" through official, non-commercial public education workshops (e.g. CPF Board / C3A).
+     * Do not force an understanding questionnaire on the user for high-stakes safety boundaries.
 7. INTENT & BARRIER REASONING:
    - Never confuse physical or social barriers with disinterest in an activity.
    - Example: "I loved ballroom dancing, but my knees hurt" -> Interest = Dancing; Barrier = Needs gentle low-impact/seated options.
@@ -496,6 +497,7 @@ async function startServer() {
                     }
 
                     responses.push({
+                      name,
                       id,
                       response: { output: result },
                     });
@@ -707,7 +709,7 @@ async function startServer() {
         });
       }
 
-      // Gemini 2.5 Flash execution for REST
+      // Gemini 3.7 Flash execution for REST
       const prompt = `
 User speech: "${userUtterance}"
 Current Life Participation Graph:
@@ -745,7 +747,7 @@ Return strictly JSON matching this structure:
 `;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.7-flash',
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_PROMPT,

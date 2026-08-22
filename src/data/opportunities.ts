@@ -48,8 +48,8 @@ export const OPPORTUNITY_CATALOG: Opportunity[] = [
       {
         titleEn: 'Gentle & Rest-Friendly',
         titleZh: '节奏温和，随时可坐下休息',
-        descEn: 'Chairs with soft cushions are provided throughout the session for zero knee strain.',
-        descZh: '每个位置都备有舒适靠椅，随时可以坐着跟着节奏轻柔舒展。',
+        descEn: 'Chairs with soft cushions are provided throughout the session for comfortable seated rest.',
+        descZh: '每个位置都备有舒适靠椅，随时可以坐着跟着节奏轻松舒展与休息。',
       },
       {
         titleEn: 'Close to Home',
@@ -145,12 +145,12 @@ export const OPPORTUNITY_CATALOG: Opportunity[] = [
   // -------------------------------------------------------------
   {
     id: 'opp-cpf-foundations',
-    titleEn: 'Understanding CPF & Transition to Retirement',
-    titleZh: '公积金与退休过渡准备讲座（官方与社区指导）',
+    titleEn: 'Understanding Relevant Information for Retirement Planning',
+    titleZh: '退休规划与公积金客观资讯公益讲座（官方认证）',
     purposeType: 'life_stage_learning',
     participationPattern: 'milestone_once',
     topics: ['cpf_education', 'retirement_transition', 'payout_options'],
-    contextTriggers: ['approaching_retirement', 'cpf_confusion', 'life_stage_transition'],
+    contextTriggers: ['approaching_retirement', 'cpf_confusion', 'life_stage_transition', 'retirement_planning_info_potential'],
     provider: 'CPF Board & Council for Third Age (C3A)',
     providerType: 'government',
     verifiedProvider: true,
@@ -169,8 +169,8 @@ export const OPPORTUNITY_CATALOG: Opportunity[] = [
     intensity: 'Seated seminar with plain-language notes',
     hostName: 'Officer Raymond Tan & C3A Guides',
     hostRole: 'Accredited public education officer (No commercial sales)',
-    whyChosenEn: 'You are approaching retirement and wanted clarity on what happens to CPF. This is a trusted, verified educational session (not financial product sales).',
-    whyChosenZh: '你正处于临近退休的准备阶段，希望了解公积金与退休规划。这是官方与社区联合举办的公益指导讲座，绝无商业推销。',
+    whyChosenEn: 'Interested in understanding relevant information for retirement planning. This is an official non-commercial public education session (no sales or financial advice).',
+    whyChosenZh: '有兴趣了解退休规划相关客观资讯。这是官方与社区联合举办的公益教育讲座，绝无商业推销与个人理财诱导。',
     detailedWhyPoints: [
       {
         titleEn: 'Trusted Verified Education',
@@ -527,6 +527,84 @@ export const OPPORTUNITY_CATALOG: Opportunity[] = [
         descZh: '快节奏剧烈跑动。',
       }
     ]
+  },
+
+  // -------------------------------------------------------------
+  // HIGH-STAKES HEALTHCARE & MEDICAL TRUST EXAMPLES
+  // -------------------------------------------------------------
+  {
+    id: 'opp-joint-health-mobility',
+    titleEn: 'Senior Joint Care & Gentle Mobility Public Education Workshop',
+    titleZh: '乐龄关节健康照护与日常活动公益科普讲座（官方医疗认证）',
+    purposeType: 'life_stage_learning',
+    participationPattern: 'milestone_once',
+    topics: ['joint_health_education', 'senior_mobility', 'healthcare_basics', 'chronic_disease_management'],
+    contextTriggers: ['joint_care_inquiry', 'healthcare_education_need', 'knee_comfort_guidance'],
+    provider: 'National Healthcare Group Polyclinics & HPB',
+    providerType: 'healthcare',
+    verifiedProvider: true, // VERIFIED: Accredited public healthcare institution
+    featured: false,
+    repeatTopicKey: 'joint_health_workshop',
+    languages: ['Mandarin', 'English'],
+    groupSize: 'Community educational group (12–15 pax)',
+    physicalIntensity: 'Seated informative talk with certified physiotherapist guidance',
+    socialStyle: ['educational', 'supportive', 'authoritative_trust'],
+    contributionType: null,
+    location: 'Toa Payoh Polyclinic Health Education Room',
+    locationDetail: '2003 Lorong 8 Toa Payoh Level 2',
+    distanceLabel: 'Sheltered connection',
+    timing: 'Friday · 10:00 AM',
+    languagePill: '中文 + English',
+    intensity: 'Seated talk with take-home exercise pamphlets',
+    hostName: 'Nurse Clinician Lim & Polyclinic Physiotherapist',
+    hostRole: 'Certified public healthcare educators',
+    whyChosenEn: 'Educational session by public healthcare professionals on daily joint care habits without commercial sales or prescription claims.',
+    whyChosenZh: '由公立综合诊疗所专业医护人员讲解日常关节保养常识，纯公益科普，无商业推销。',
+    detailedWhyPoints: [
+      {
+        titleEn: 'Certified Healthcare Education',
+        titleZh: '专业医护公益科普',
+        descEn: 'Led by accredited physiotherapists explaining safe daily movements.',
+        descZh: '由专业物理治疗师讲解日常保护关节的平缓活动常识。',
+      }
+    ]
+  },
+  {
+    id: 'opp-unverified-supplement-sales',
+    titleEn: 'Miracle Joint Quick-Cure Commercial Sales Pitch',
+    titleZh: '神效关节灵高价保健品推销讲座（未认证商业推销）',
+    purposeType: 'life_stage_learning',
+    participationPattern: 'one_off',
+    topics: ['joint_health_education', 'medical_cure_claims', 'supplement_sales'],
+    contextTriggers: ['joint_care_inquiry', 'healthcare_education_need'],
+    provider: 'Unverified Commercial Health Mart Pte Ltd',
+    providerType: 'verified_business',
+    verifiedProvider: false, // UNVERIFIED: High-stakes medical topic from unverified provider -> MUST BE REJECTED!
+    featured: false,
+    repeatTopicKey: null,
+    languages: ['Mandarin', 'English'],
+    groupSize: 'Commercial sales pitch',
+    physicalIntensity: 'Seated high-pressure seminar',
+    socialStyle: ['aggressive_sales'],
+    contributionType: null,
+    location: 'Commercial Retail Shop',
+    locationDetail: 'Commercial Unit #01-12',
+    distanceLabel: '1 km away',
+    timing: 'Daily',
+    languagePill: 'English',
+    intensity: 'High pressure sales talk',
+    hostName: 'Sales Agent Jason',
+    hostRole: 'Commercial supplement salesman',
+    whyChosenEn: 'Unverified commercial sales pitch making medical claims.',
+    whyChosenZh: '未认证商业推销，宣称神效。',
+    detailedWhyPoints: [
+      {
+        titleEn: 'Commercial Sales',
+        titleZh: '商业推销',
+        descEn: 'Aggressive sales pitch for unverified products.',
+        descZh: '推销未经认证的昂贵保健品。',
+      }
+    ]
   }
 ];
 
@@ -542,12 +620,12 @@ export const DEFAULT_LIFE_PARTICIPATION_GRAPH: LifeParticipationGraph = {
     neighborhood: 'Toa Payoh Lorong 4',
     languages: ['Mandarin', 'English'],
     lifeStage: 'approaching_retirement',
-    bio: 'Lives independently in Toa Payoh. Used to enjoy ballroom dancing with her late husband. Now prefers gentler, comfortable activities and feels hesitant going to completely unfamiliar places alone.',
+    bio: 'Lives independently in Toa Payoh. Used to enjoy ballroom dancing with her husband. Now prefers gentler, comfortable activities and feels hesitant going to completely unfamiliar places alone.',
   },
   interests: ['Ballroom dancing (classic waltz, cha-cha)', 'Morning tea & light stretching', 'Community gardens', 'Evergreen songs'],
   capabilities: ['Classic dance rhythm knowledge', 'Herbal tea brewing', 'Cooking heritage dishes'],
   purposeDrivers: ['Mentoring peers', 'Sharing life experiences', 'Helping shy neighbors'],
-  importantRelationships: ['Late husband (cherished memory)', 'Auntie Mei Ling (neighbor)', 'Volunteer Sarah'],
+  importantRelationships: ['Husband (cherished memory)', 'Auntie Mei Ling (neighbor)', 'Volunteer Sarah'],
   socialPreferences: ['Prefers small warm groups (4-8 pax)', 'Doorway companion / greeter at entrance'],
   participationBarriers: ['Unfamiliar venues alone', 'Knee strain / high impact activities', 'Loud crowded noisy environments'],
   accessibilityPreferences: ['Low impact comfortable tempo', 'Seated or rest-friendly options', 'Sheltered walkways < 500m'],
@@ -559,3 +637,37 @@ export const DEFAULT_LIFE_PARTICIPATION_GRAPH: LifeParticipationGraph = {
   recentOpportunityHistory: [],
   dislikes: ['Vigorous jumping / running', 'Aggressive commercial sales'],
 };
+
+/**
+ * Creates an immutable, deep-cloned clean Life Participation Graph
+ * starting strictly from the clean baseline and applying optional overrides.
+ * This guarantees zero cross-scenario state contamination.
+ */
+export function createFreshGraph(override?: Partial<LifeParticipationGraph>): LifeParticipationGraph {
+  const base = JSON.parse(JSON.stringify(DEFAULT_LIFE_PARTICIPATION_GRAPH)) as LifeParticipationGraph;
+  if (!override) return base;
+
+  return {
+    ...base,
+    ...override,
+    profile: {
+      ...base.profile,
+      ...(override.profile || {}),
+      languages: override.profile?.languages ? [...override.profile.languages] : [...base.profile.languages],
+    },
+    interests: override.interests ? [...override.interests] : [...base.interests],
+    capabilities: override.capabilities ? [...override.capabilities] : [...base.capabilities],
+    purposeDrivers: override.purposeDrivers ? [...override.purposeDrivers] : [...base.purposeDrivers],
+    importantRelationships: override.importantRelationships ? [...override.importantRelationships] : [...base.importantRelationships],
+    socialPreferences: override.socialPreferences ? [...override.socialPreferences] : [...base.socialPreferences],
+    participationBarriers: override.participationBarriers ? [...override.participationBarriers] : [...base.participationBarriers],
+    accessibilityPreferences: override.accessibilityPreferences ? [...override.accessibilityPreferences] : [...base.accessibilityPreferences],
+    activityPreferences: override.activityPreferences ? [...override.activityPreferences] : [...base.activityPreferences],
+    contextualSignals: override.contextualSignals ? [...override.contextualSignals] : [...base.contextualSignals],
+    completedOpportunityIds: override.completedOpportunityIds ? [...override.completedOpportunityIds] : [...base.completedOpportunityIds],
+    completedTopicKeys: override.completedTopicKeys ? [...override.completedTopicKeys] : [...base.completedTopicKeys],
+    currentSeries: override.currentSeries ? JSON.parse(JSON.stringify(override.currentSeries)) : JSON.parse(JSON.stringify(base.currentSeries)),
+    recentOpportunityHistory: override.recentOpportunityHistory ? JSON.parse(JSON.stringify(override.recentOpportunityHistory)) : JSON.parse(JSON.stringify(base.recentOpportunityHistory)),
+    dislikes: override.dislikes ? [...override.dislikes] : [...base.dislikes],
+  };
+}

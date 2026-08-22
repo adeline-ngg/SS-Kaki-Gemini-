@@ -10,6 +10,7 @@ interface RecommendationScreenProps {
   onAccept: () => void;
   onShowNext: () => void;
   onWhyThis: () => void;
+  onOpenDiagnostics?: () => void;
 }
 
 export const RecommendationScreen: React.FC<RecommendationScreenProps> = ({
@@ -19,6 +20,7 @@ export const RecommendationScreen: React.FC<RecommendationScreenProps> = ({
   onAccept,
   onShowNext,
   onWhyThis,
+  onOpenDiagnostics,
 }) => {
   const isLarge = textScale === 'large';
   const framing = getPurposeFraming(activity.purposeType || 'lifestyle_social');
@@ -147,14 +149,16 @@ export const RecommendationScreen: React.FC<RecommendationScreenProps> = ({
             <span>Show something else · 换一个看看</span>
           </button>
 
-          <button
-            type="button"
-            id="recommendation-why-this-btn"
-            onClick={onWhyThis}
-            className="w-full py-0.5 text-center text-[11px] text-[#2D2C2A]/50 hover:text-[#CB8570] transition-colors font-medium cursor-pointer"
-          >
-            Why this? · 查看匹配理由
-          </button>
+          <div className="flex items-center justify-center pt-1">
+            <button
+              type="button"
+              id="recommendation-why-this-btn"
+              onClick={onWhyThis}
+              className="text-[11px] sm:text-xs text-[#2D2C2A]/60 hover:text-[#CB8570] transition-colors font-semibold cursor-pointer underline decoration-[#EDE0D4] underline-offset-4"
+            >
+              Why this? · 查看匹配理由
+            </button>
+          </div>
         </div>
       </div>
     </div>

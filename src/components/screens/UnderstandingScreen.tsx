@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, Edit3, Music, Users, HeartHandshake, MapPin, Mic, ArrowRight } from 'lucide-react';
+import { Check, Edit3, Music, Users, HeartHandshake, MapPin, Mic, Database } from 'lucide-react';
 import { UnderstandingItem, LanguageMode, TextScale } from '../../types';
 
 interface UnderstandingScreenProps {
@@ -9,6 +9,7 @@ interface UnderstandingScreenProps {
   onConfirm: () => void;
   onEdit: () => void;
   onVoiceCorrect: () => void;
+  onOpenGraphVisualizer?: () => void;
 }
 
 export const UnderstandingScreen: React.FC<UnderstandingScreenProps> = ({
@@ -18,6 +19,7 @@ export const UnderstandingScreen: React.FC<UnderstandingScreenProps> = ({
   onConfirm,
   onEdit,
   onVoiceCorrect,
+  onOpenGraphVisualizer,
 }) => {
   const isLarge = textScale === 'large';
 
@@ -125,15 +127,17 @@ export const UnderstandingScreen: React.FC<UnderstandingScreenProps> = ({
         </button>
 
         {/* Voice Hint */}
-        <button
-          type="button"
-          id="understanding-voice-correct-btn"
-          onClick={onVoiceCorrect}
-          className="w-full py-1.5 flex items-center justify-center gap-1.5 text-[11px] sm:text-xs text-[#2D2C2A]/60 hover:text-[#CB8570] transition-colors font-medium cursor-pointer"
-        >
-          <Mic className="w-3.5 h-3.5 text-[#CB8570]" />
-          <span>Or tap here to speak what to change · 也可说话修改</span>
-        </button>
+        <div className="flex flex-col items-center gap-1 pt-1">
+          <button
+            type="button"
+            id="understanding-voice-correct-btn"
+            onClick={onVoiceCorrect}
+            className="py-1 flex items-center justify-center gap-1.5 text-[11px] sm:text-xs text-[#2D2C2A]/60 hover:text-[#CB8570] transition-colors font-medium cursor-pointer"
+          >
+            <Mic className="w-3.5 h-3.5 text-[#CB8570]" />
+            <span>Or tap here to speak what to change · 也可说话修改</span>
+          </button>
+        </div>
       </div>
     </div>
   );

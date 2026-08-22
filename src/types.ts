@@ -1,4 +1,4 @@
-export type ScreenType = 'home' | 'conversation' | 'understanding' | 'recommendation' | 'my-world';
+export type ScreenType = 'home' | 'conversation' | 'understanding' | 'graph' | 'recommendation' | 'my-world';
 
 export type ConversationState = 'listening' | 'thinking' | 'speaking' | 'paused';
 
@@ -40,13 +40,22 @@ export type ProviderType =
   | 'verified_business'
   | 'volunteer_organisation';
 
+export type QualifyingRelevanceBasis =
+  | 'expressed_interest'
+  | 'life_stage_context'
+  | 'participation_barrier'
+  | 'purpose_fit'
+  | 'discovery_need'
+  | 'capability_need';
+
 export type RelevanceBasis =
   | 'expressed_interest'
   | 'life_stage_context'
   | 'participation_barrier'
   | 'purpose_fit'
-  | 'discovery'
-  | 'capability_need';
+  | 'discovery_need'
+  | 'capability_need'
+  | 'discovery'; // Alias for backwards compatibility
 
 export interface OpportunityHistoryItem {
   opportunityId: string;

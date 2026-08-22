@@ -6,6 +6,7 @@ import { ConversationScreen } from './components/screens/ConversationScreen';
 import { UnderstandingScreen } from './components/screens/UnderstandingScreen';
 import { RecommendationScreen } from './components/screens/RecommendationScreen';
 import { MyWorldScreen } from './components/screens/MyWorldScreen';
+import { GraphVisualizerScreen } from './components/screens/GraphVisualizerScreen';
 import { DemoInsightsModal } from './components/modals/DemoInsightsModal';
 import { EditUnderstandingModal } from './components/modals/EditUnderstandingModal';
 import { WhyThisModal } from './components/modals/WhyThisModal';
@@ -30,7 +31,7 @@ import {
   INITIAL_MY_WORLD_STATS,
   MY_WORLD_CATEGORIES,
 } from './data/mockData';
-import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG } from './data/opportunities';
+import { DEFAULT_LIFE_PARTICIPATION_GRAPH, OPPORTUNITY_CATALOG, createFreshGraph } from './data/opportunities';
 import { runRecommendationPipeline } from './services/recommendationEngine';
 import { TestScenario } from './data/scenarios';
 import { LiveVoiceService } from './services/liveVoiceService';
@@ -68,10 +69,12 @@ export default function App() {
   const [myWorldStats, setMyWorldStats] = useState<MyWorldStats>(INITIAL_MY_WORLD_STATS);
   const [isLoadingBackend, setIsLoadingBackend] = useState(false);
 
-  // Modals
+  // Modals & Diagnostics
   const [isDemoInsightsOpen, setIsDemoInsightsOpen] = useState(false);
+  const [initialDemoTab, setInitialDemoTab] = useState<'scenarios' | 'gemini' | 'graph' | 'insights' | 'persona' | 'jumper'>('scenarios');
   const [isEditUnderstandingOpen, setIsEditUnderstandingOpen] = useState(false);
   const [isWhyThisOpen, setIsWhyThisOpen] = useState(false);
+  const [isVoiceAudioEnabled, setIsVoiceAudioEnabled] = useState(false);
 
   // Reference to LiveVoiceService instance
   const liveVoiceServiceRef = useRef<LiveVoiceService | null>(null);
@@ -222,8 +225,8 @@ export default function App() {
     } finally {
       setIsLoadingBackend(false);
       setConversationState('speaking');
-      // Play audio response via TTS fallback if browser supports it
-      if ('speechSynthesis' in window) {
+      // Play audio response via TTS fallback only if audio is enabled
+      if (isVoiceAudioEnabled && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
         const textToSpeak = languageMode === 'en' ? kakiResponseEn : kakiResponseZh;
         const cleanText = textToSpeak.replace(/[“"”]/g, '');
@@ -234,23 +237,20 @@ export default function App() {
     }
   };
 
-  // Run a scenario from the Test Lab (Scenarios A through I)
+  // Run a scenario from the Test Lab (Scenarios A through K)
   const handleApplyScenario = (scenario: TestScenario) => {
-    const updated: LifeParticipationGraph = {
-      ...lifeGraph,
-      ...scenario.graphOverride,
-    };
+    // Completely isolated clean baseline graph merge
+    const updated: LifeParticipationGraph = createFreshGraph(scenario.graphOverride);
     setLifeGraph(updated);
     setUserUtteranceZh(scenario.transcriptZh);
     setUserUtteranceEn(scenario.transcriptEn);
     setKakiResponseZh(scenario.kakiResponseZh);
     setKakiResponseEn(scenario.kakiResponseEn);
 
-    if (scenario.understandingItems && scenario.understandingItems.length > 0) {
-      setUnderstandingItems(scenario.understandingItems);
-    }
+    // Explicitly set understanding items (or clear to [] if not provided)
+    setUnderstandingItems(scenario.understandingItems || []);
 
-    // Run deterministic pipeline
+    // Run deterministic pipeline on clean graph
     const pipelineRes = runRecommendationPipeline(updated, OPPORTUNITY_CATALOG, scenario.prompt);
     if (pipelineRes.topOpportunities.length > 0) {
       setRecommendationsList(pipelineRes.topOpportunities);
@@ -263,11 +263,16 @@ export default function App() {
       liveVoiceServiceRef.current.sendText(scenario.prompt);
     }
 
-    setConversationState('speaking');
-    setCurrentScreen('conversation');
+    // Routing decision: High-stakes boundary protection pushes directly to recommendation
+    if (scenario.directRouteToRecommendation) {
+      setCurrentScreen('recommendation');
+    } else {
+      setConversationState('speaking');
+      setCurrentScreen('conversation');
+    }
 
-    // Synthesize audio
-    if ('speechSynthesis' in window) {
+    // Synthesize audio only if voice audio is enabled by user
+    if (isVoiceAudioEnabled && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const clean = scenario.kakiResponseZh.replace(/[“"”]/g, '');
       const utt = new SpeechSynthesisUtterance(clean);
@@ -278,21 +283,22 @@ export default function App() {
 
   // Reset Demo to fresh clean state
   const handleResetDemo = () => {
-    setLifeGraph(DEFAULT_LIFE_PARTICIPATION_GRAPH);
+    const cleanBaseline = createFreshGraph();
+    setLifeGraph(cleanBaseline);
     setUnderstandingItems(INITIAL_UNDERSTANDING_ITEMS);
     setRecommendationsList(RECOMMENDATIONS);
     setCurrentRecIndex(0);
     setConfirmedActivity(null);
     setMyWorldStats(INITIAL_MY_WORLD_STATS);
     setUserUtteranceZh('“以前我跟我老公很喜欢去跳舞。Ballroom 那种。现在比较少去了。”');
-    setUserUtteranceEn('"My late husband and I used to love ballroom dancing. We rarely go these days."');
-    setKakiResponseZh('“原来你还是很喜欢跳舞。现在如果有人陪你一起去，你会比较愿意吗？”');
-    setKakiResponseEn('"So dancing is still something you love. If someone could accompany you, would you feel more open to going?"');
+    setUserUtteranceEn('"My husband and I used to really enjoy ballroom dancing. We don\'t go much anymore."');
+    setKakiResponseZh('“原来你还是很喜欢跳舞。大巴窑联络所有温和的茶舞与音乐聚会，环境很轻松，你想不想去看看？”');
+    setKakiResponseEn('"So dancing is still something you love. Toa Payoh CC has a relaxed tea dance and evergreen music gathering. Would you like to check it out?"');
     setMemoryConsentPrompt(null);
     setLiveErrorMessage(null);
     if (liveVoiceServiceRef.current) {
       liveVoiceServiceRef.current.resetConversation();
-      liveVoiceServiceRef.current.setGraph(DEFAULT_LIFE_PARTICIPATION_GRAPH);
+      liveVoiceServiceRef.current.setGraph(cleanBaseline);
     }
     setCurrentScreen('home');
   };
@@ -324,6 +330,26 @@ export default function App() {
       liveVoiceServiceRef.current.stopAudioPlayback();
     }
     setCurrentScreen('understanding');
+  };
+
+  const handleDirectToRetirementRecommendation = () => {
+    if (liveVoiceServiceRef.current) {
+      liveVoiceServiceRef.current.stopAudioPlayback();
+    }
+    // Explicitly select the retirement planning workshop
+    const cpfIndex = recommendationsList.findIndex(
+      (r) => r.id === 'opp-cpf-foundations' || r.purposeType === 'life_stage_learning'
+    );
+    if (cpfIndex >= 0) {
+      setCurrentRecIndex(cpfIndex);
+    } else {
+      const cpfOpp = OPPORTUNITY_CATALOG.find((r) => r.id === 'opp-cpf-foundations');
+      if (cpfOpp) {
+        setRecommendationsList([cpfOpp, ...recommendationsList]);
+        setCurrentRecIndex(0);
+      }
+    }
+    setCurrentScreen('recommendation');
   };
 
   const handleConfirmUnderstanding = () => {
@@ -429,8 +455,13 @@ export default function App() {
           onLanguageChange={setLanguageMode}
           textScale={textScale}
           onTextScaleToggle={() => setTextScale((prev) => (prev === 'normal' ? 'large' : 'normal'))}
-          onOpenDemoInsights={() => setIsDemoInsightsOpen(true)}
+          onOpenDemoInsights={(tab) => {
+            setInitialDemoTab(tab || 'scenarios');
+            setIsDemoInsightsOpen(true);
+          }}
           onLogoClick={handleGoHome}
+          isVoiceAudioEnabled={isVoiceAudioEnabled}
+          onToggleVoiceAudio={() => setIsVoiceAudioEnabled((prev) => !prev)}
         />
 
         {/* Main App Screen Viewport */}
@@ -459,11 +490,13 @@ export default function App() {
               memoryConsentPrompt={memoryConsentPrompt}
               onGoHome={handleGoHome}
               onProceedToUnderstanding={handleProceedToUnderstanding}
+              onDirectToRecommendation={handleDirectToRetirementRecommendation}
               userUtteranceZh={userUtteranceZh}
               userUtteranceEn={userUtteranceEn}
               kakiResponseZh={kakiResponseZh}
               kakiResponseEn={kakiResponseEn}
               onProcessUtterance={handleProcessUtterance}
+              onApplyScenario={handleApplyScenario}
               onInterrupt={handleInterrupt}
               onTogglePause={handleTogglePause}
               onHearAgain={handleHearAgain}
@@ -483,6 +516,20 @@ export default function App() {
               onConfirm={handleConfirmUnderstanding}
               onEdit={() => setIsEditUnderstandingOpen(true)}
               onVoiceCorrect={() => setIsEditUnderstandingOpen(true)}
+              onOpenGraphVisualizer={() => setCurrentScreen('graph')}
+            />
+          )}
+
+          {/* SCREEN: LIVE LIFE PARTICIPATION GRAPH VISUALIZER */}
+          {currentScreen === 'graph' && (
+            <GraphVisualizerScreen
+              graph={lifeGraph}
+              languageMode={languageMode}
+              textScale={textScale}
+              onApplyScenario={handleApplyScenario}
+              onNavigateToRecommendation={() => setCurrentScreen('recommendation')}
+              onNavigateToConversation={() => setCurrentScreen('conversation')}
+              onGoHome={handleGoHome}
             />
           )}
 
@@ -527,7 +574,9 @@ export default function App() {
           activeGraph={lifeGraph}
           onApplyScenario={handleApplyScenario}
           onResetDemo={handleResetDemo}
+          onProcessUtterance={handleProcessUtterance}
           activeOpportunity={currentRecommendation}
+          initialTab={initialDemoTab}
         />
 
         <EditUnderstandingModal

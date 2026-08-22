@@ -1,7 +1,31 @@
-import React from 'react';
-import { Home, Check, Volume2, RotateCcw, ArrowRight, Pause, Play, Sparkles, AlertCircle, RefreshCw, BookmarkCheck, X } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Home,
+  Check,
+  Volume2,
+  RotateCcw,
+  ArrowRight,
+  Pause,
+  Play,
+  Sparkles,
+  AlertCircle,
+  RefreshCw,
+  BookmarkCheck,
+  X,
+  Send,
+  Keyboard,
+  Mic,
+  ShieldCheck,
+} from 'lucide-react';
 import { VoiceOrb } from '../VoiceOrb';
-import { ConversationState, LanguageMode, TextScale, LiveVoiceMode, LiveConnectionStatus, MemoryConsentPrompt } from '../../types';
+import {
+  ConversationState,
+  LanguageMode,
+  TextScale,
+  LiveVoiceMode,
+  LiveConnectionStatus,
+  MemoryConsentPrompt,
+} from '../../types';
 
 interface ConversationScreenProps {
   currentState: ConversationState;
@@ -14,6 +38,7 @@ interface ConversationScreenProps {
   memoryConsentPrompt?: MemoryConsentPrompt | null;
   onGoHome: () => void;
   onProceedToUnderstanding: () => void;
+  onDirectToRecommendation?: () => void;
   userUtteranceZh?: string;
   userUtteranceEn?: string;
   kakiResponseZh?: string;
@@ -39,6 +64,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
   memoryConsentPrompt = null,
   onGoHome,
   onProceedToUnderstanding,
+  onDirectToRecommendation,
   userUtteranceZh = '“以前我跟我老公很喜欢去跳舞。Ballroom 那种。现在比较少去了。”',
   userUtteranceEn = '"My late husband and I used to love ballroom dancing. We rarely go these days."',
   kakiResponseZh = '“原来你还是很喜欢跳舞。现在如果有人陪你一起去，你会比较愿意吗？”',
@@ -53,11 +79,33 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
   isLoadingBackend = false,
 }) => {
   const isLarge = textScale === 'large';
+  const [isKeyboardMode, setIsKeyboardMode] = useState(false);
+  const [typedInput, setTypedInput] = useState('');
+
+  // Check if current context is high-stakes boundary (e.g. Scenario E)
+  const isHighStakesContext =
+    userUtteranceZh?.includes('股票') ||
+    userUtteranceZh?.includes('保险') ||
+    userUtteranceZh?.includes('公积金全部领出来') ||
+    userUtteranceEn?.includes('withdraw all my CPF') ||
+    kakiResponseZh?.includes('我不能给你个人财务') ||
+    kakiResponseEn?.includes('cannot give you personal financial');
 
   // Handle user completing speech in manual/fallback mode
   const handleUserDone = async () => {
     if (onProcessUtterance) {
       await onProcessUtterance(userUtteranceEn || userUtteranceZh);
+    }
+  };
+
+  const handleSendTyped = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!typedInput.trim() || isLoadingBackend) return;
+    const text = typedInput.trim();
+    setTypedInput('');
+    setIsKeyboardMode(false);
+    if (onProcessUtterance) {
+      await onProcessUtterance(text);
     }
   };
 
@@ -76,9 +124,9 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col justify-between py-1">
+    <div className="flex-1 flex flex-col justify-between py-1 gap-2">
       {/* Top Header Row with Step / Home Button & Live Voice Mode Pill */}
-      <div className="flex items-center justify-between pb-2.5 border-b border-[#EDE0D4]">
+      <div className="flex items-center justify-between pb-2 border-b border-[#EDE0D4]">
         <button
           type="button"
           id="conv-back-home-btn"
@@ -90,7 +138,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
         </button>
 
         {/* State Indicator Badge & Live Gemini Status */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {liveVoiceMode === 'live' && (
             <span
               className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
@@ -133,7 +181,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
 
       {/* Memory Consent Gentle Banner */}
       {memoryConsentPrompt && (
-        <div className="my-2 p-3 bg-[#E9EDC9]/80 border border-[#CCD5AE] rounded-2xl flex items-center justify-between gap-2 animate-in slide-in-from-top duration-300">
+        <div className="my-1 p-3 bg-[#E9EDC9]/80 border border-[#CCD5AE] rounded-2xl flex items-center justify-between gap-2 animate-in slide-in-from-top duration-300">
           <div className="flex items-center gap-2">
             <BookmarkCheck className="w-4 h-4 text-[#1B3022] flex-shrink-0" />
             <div className="text-xs text-[#1B3022]">
@@ -161,7 +209,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
 
       {/* Connection Warning / Error Banner if any */}
       {errorMessage && (
-        <div className="my-2 p-3 bg-[#FFF3CD] border border-[#FFE69C] rounded-2xl flex items-center justify-between gap-2 text-xs text-[#664D03]">
+        <div className="my-1 p-3 bg-[#FFF3CD] border border-[#FFE69C] rounded-2xl flex items-center justify-between gap-2 text-xs text-[#664D03]">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-[#CB8570] flex-shrink-0" />
             <span>{errorMessage}</span>
@@ -180,7 +228,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
       )}
 
       {/* Center Voice Orb with visual reaction & live volume */}
-      <div className="my-2 flex justify-center">
+      <div className="my-1 flex justify-center">
         <VoiceOrb
           state={currentState}
           onClick={handleOrbClick}
@@ -196,7 +244,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
       <div className="flex-1 flex flex-col justify-center my-1">
         {/* State 1: LISTENING */}
         {currentState === 'listening' && (
-          <div className="space-y-3 animate-in fade-in duration-300">
+          <div className="space-y-2.5 animate-in fade-in duration-300">
             <div className="text-center">
               <h2
                 className={`font-semibold text-[#2D2C2A] ${
@@ -211,7 +259,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
             </div>
 
             {/* Live Transcript Box */}
-            <div className="p-5 rounded-3xl bg-white/80 border border-[#EDE0D4] shadow-xs relative text-center min-h-[90px] flex flex-col justify-center">
+            <div className="p-4 sm:p-5 rounded-3xl bg-white/80 border border-[#EDE0D4] shadow-xs relative text-center min-h-[85px] flex flex-col justify-center">
               <p
                 className={`font-medium text-[#2D2C2A] leading-relaxed break-words ${
                   isLarge ? 'text-lg sm:text-xl' : 'text-base sm:text-lg'
@@ -221,7 +269,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
               </p>
               {languageMode !== 'zh' && userUtteranceEn && (
                 <p
-                  className="mt-2 text-[#2D2C2A]/60 italic font-normal text-xs sm:text-sm leading-normal break-words"
+                  className="mt-1.5 text-[#2D2C2A]/60 italic font-normal text-xs sm:text-sm leading-normal break-words"
                 >
                   {userUtteranceEn}
                 </p>
@@ -251,19 +299,35 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
 
         {/* State 3: SPEAKING or PAUSED */}
         {(currentState === 'speaking' || currentState === 'paused') && (
-          <div className="space-y-3 animate-in fade-in duration-300">
+          <div className="space-y-2.5 animate-in fade-in duration-300">
+            {/* Friendly Safety Notice Banner if High Stakes */}
+            {isHighStakesContext && (
+              <div className="p-3 rounded-2xl bg-[#E9EDC9]/60 border border-[#CCD5AE] text-[#1B3022] shadow-2xs">
+                <div className="flex items-center gap-2 mb-1">
+                  <ShieldCheck className="w-4 h-4 text-[#1B3022] flex-shrink-0" />
+                  <span className="text-xs font-bold uppercase tracking-wide">
+                    Official Guidance · 官方建议说明
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#1B3022]/80 leading-snug">
+                  Personal financial, stock, or investment decisions require licensed advisors. Kaki connects you with verified non-commercial public education workshops.
+                </p>
+              </div>
+            )}
+
             {/* Kaki Speech Card */}
-            <div className="p-5 rounded-3xl bg-white border border-[#EDE0D4] shadow-md relative">
-              <div className="flex items-center justify-between mb-3">
+            <div className="p-4 sm:p-5 rounded-3xl bg-white border border-[#EDE0D4] shadow-md relative">
+              <div className="flex items-center justify-between mb-2.5">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-full bg-[#CB8570] flex items-center justify-center text-white text-xs font-bold shadow-xs">
                     K
                   </div>
                   <span className="font-bold text-xs sm:text-sm text-[#2D2C2A]">Kaki</span>
                 </div>
+
                 <div className="flex items-center gap-1 text-[11px] text-[#CB8570] font-semibold bg-[#CB8570]/10 px-2.5 py-0.5 rounded-full">
                   <Volume2 className="w-3 h-3" />
-                  <span>Voice active · 可随时打断</span>
+                  <span>Spoken response</span>
                 </div>
               </div>
 
@@ -284,7 +348,7 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
               )}
 
               {/* Spoken Audio Controls */}
-              <div className="mt-4 pt-3 border-t border-[#EDE0D4] flex items-center justify-between gap-2">
+              <div className="mt-3.5 pt-2.5 border-t border-[#EDE0D4] flex items-center justify-between gap-2">
                 <button
                   type="button"
                   id="conv-hear-again-btn"
@@ -319,37 +383,104 @@ export const ConversationScreen: React.FC<ConversationScreenProps> = ({
         )}
       </div>
 
-      {/* Primary Action Button Bar */}
-      <div className="pt-3 pb-1 space-y-2">
-        {currentState === 'listening' && (
+      {/* Optional Senior-Friendly Keyboard Mode Drawer */}
+      {isKeyboardMode ? (
+        <form onSubmit={handleSendTyped} className="flex items-center gap-2 bg-white p-2 rounded-2xl border border-[#EDE0D4] shadow-xs animate-in slide-in-from-bottom-2 duration-150">
+          <input
+            type="text"
+            id="custom-utterance-input"
+            value={typedInput}
+            onChange={(e) => setTypedInput(e.target.value)}
+            placeholder="Type a message to Kaki · 给卡奇发消息…"
+            className="flex-1 px-3 py-2 text-xs sm:text-sm bg-transparent outline-none text-[#2D2C2A] placeholder-[#2D2C2A]/40"
+            disabled={isLoadingBackend}
+            autoFocus
+          />
+          <button
+            type="submit"
+            id="send-utterance-btn"
+            disabled={!typedInput.trim() || isLoadingBackend}
+            className="p-2 rounded-xl bg-[#1B3022] hover:bg-[#25402E] disabled:opacity-40 text-white transition-all cursor-pointer flex-shrink-0"
+            title="Send message"
+          >
+            <Send className="w-4 h-4" />
+          </button>
           <button
             type="button"
-            id="conv-done-speaking-btn"
-            onClick={handleUserDone}
-            className="w-full h-14 sm:h-16 rounded-full bg-[#1B3022] hover:bg-[#25402E] text-white font-semibold text-base sm:text-lg shadow-md flex items-center justify-center gap-2.5 transition-all active:scale-98 cursor-pointer touch-manipulation"
+            onClick={() => setIsKeyboardMode(false)}
+            className="p-2 rounded-xl text-[#2D2C2A]/50 hover:bg-[#EDE0D4]/30 cursor-pointer flex-shrink-0"
+            title="Switch back to voice"
           >
-            <Check className="w-5 h-5 stroke-[3]" />
-            <span>Done / 说完了</span>
+            <Mic className="w-4 h-4 text-[#CB8570]" />
           </button>
+        </form>
+      ) : null}
+
+      {/* Primary Action Button Bar */}
+      <div className="pt-2 pb-1 space-y-2">
+        {currentState === 'listening' && (
+          <div className="space-y-1.5">
+            <button
+              type="button"
+              id="conv-done-speaking-btn"
+              onClick={handleUserDone}
+              className="w-full h-13 sm:h-15 rounded-full bg-[#1B3022] hover:bg-[#25402E] text-white font-semibold text-base sm:text-lg shadow-md flex items-center justify-center gap-2.5 transition-all active:scale-98 cursor-pointer touch-manipulation"
+            >
+              <Check className="w-5 h-5 stroke-[3]" />
+              <span>Done / 说完了</span>
+            </button>
+
+            {!isKeyboardMode && (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setIsKeyboardMode(true)}
+                  className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs text-[#2D2C2A]/60 hover:text-[#2D2C2A] hover:bg-white transition-colors cursor-pointer"
+                >
+                  <Keyboard className="w-3.5 h-3.5 text-[#CB8570]" />
+                  <span>Type message instead · 键盘打字</span>
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         {(currentState === 'speaking' || currentState === 'paused') && (
-          <button
-            type="button"
-            id="conv-proceed-understanding-btn"
-            onClick={onProceedToUnderstanding}
-            className="w-full h-14 sm:h-16 rounded-full bg-[#1B3022] hover:bg-[#25402E] text-white font-semibold text-base sm:text-lg shadow-md flex items-center justify-center gap-2.5 transition-all active:scale-98 cursor-pointer touch-manipulation px-4 text-center"
-          >
-            <span className="truncate">Let's check · 看看理解得对不对</span>
-            <ArrowRight className="w-5 h-5 flex-shrink-0 stroke-[2.5]" />
-          </button>
+          <div className="space-y-2">
+            {isHighStakesContext ? (
+              <div className="space-y-2">
+                {onDirectToRecommendation && (
+                  <button
+                    type="button"
+                    id="conv-direct-rec-btn"
+                    onClick={onDirectToRecommendation}
+                    className="w-full h-13 sm:h-15 rounded-full bg-[#1B3022] hover:bg-[#25402E] text-white font-semibold text-sm sm:text-base shadow-md flex items-center justify-center gap-2 transition-all active:scale-98 cursor-pointer touch-manipulation px-4 text-center"
+                  >
+                    <ShieldCheck className="w-5 h-5 text-[#CCD5AE]" />
+                    <span className="truncate">View Verified Public Workshop · 查看官方公益讲座</span>
+                    <ArrowRight className="w-4 h-4 flex-shrink-0" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                id="conv-proceed-understanding-btn"
+                onClick={onProceedToUnderstanding}
+                className="w-full h-13 sm:h-15 rounded-full bg-[#1B3022] hover:bg-[#25402E] text-white font-semibold text-base sm:text-lg shadow-md flex items-center justify-center gap-2.5 transition-all active:scale-98 cursor-pointer touch-manipulation px-4 text-center"
+              >
+                <span className="truncate">Let's check · 看看理解得对不对</span>
+                <ArrowRight className="w-5 h-5 flex-shrink-0 stroke-[2.5]" />
+              </button>
+            )}
+          </div>
         )}
 
         <div className="text-center">
           <button
             type="button"
             onClick={onGoHome}
-            className="text-xs text-[#2D2C2A]/50 font-medium hover:text-[#2D2C2A]/80 py-1 cursor-pointer"
+            className="text-xs text-[#2D2C2A]/50 font-medium hover:text-[#2D2C2A]/80 py-0.5 cursor-pointer"
           >
             Cancel / 取消
           </button>

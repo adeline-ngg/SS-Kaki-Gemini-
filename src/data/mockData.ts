@@ -10,7 +10,7 @@ export const DEMO_PERSONA: PersonaProfile = {
   location: 'Toa Payoh Central',
   neighborhood: 'Toa Payoh Lorong 4',
   preferredLanguages: 'Mandarin + English',
-  bio: 'Lives independently in Toa Payoh. Used to enjoy ballroom dancing with her late husband. Now prefers gentler, comfortable activities and feels hesitant going to completely unfamiliar places alone.',
+  bio: 'Lives independently in Toa Payoh. Used to enjoy ballroom dancing with her husband. Now prefers gentler, comfortable activities and feels hesitant going to completely unfamiliar places alone.',
   interests: ['Ballroom dancing (classic waltz, cha-cha)', 'Morning tea & light stretching', 'Community gardens'],
   socialPreferences: 'Prefers small warm groups (4-8 pax) with someone to accompany or meet at the door',
   barriers: 'Does not like attending unfamiliar events alone; large noisy venues can be overwhelming',

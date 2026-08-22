@@ -36,20 +36,29 @@ function containsAny(haystack: string, needles: string[]): boolean {
 }
 
 async function postChat(utterance: string, graph: LifeParticipationGraph): Promise<ChatResponse> {
-  const res = await fetch(`${BASE_URL}/api/kaki/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      userUtterance: utterance,
-      currentGraph: graph,
-      languageMode: 'mixed',
-    }),
-  });
-  const data = (await res.json()) as ChatResponse;
-  if (!res.ok) {
-    throw new Error(data.error || `chat HTTP ${res.status}`);
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(`${BASE_URL}/api/kaki/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userUtterance: utterance,
+        currentGraph: graph,
+        languageMode: 'mixed',
+      }),
+    });
+    const data = (await res.json()) as ChatResponse;
+    if (res.ok) {
+      return data;
+    }
+    lastError = new Error(data.error || `chat HTTP ${res.status}`);
+    const retryable = /503|UNAVAILABLE|high demand|try again later/i.test(String(data.error || ''));
+    if (!retryable || attempt === 2) {
+      throw lastError;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
   }
-  return data;
+  throw lastError || new Error('chat failed');
 }
 
 async function probeLive(): Promise<{ status: string; message?: string }> {
